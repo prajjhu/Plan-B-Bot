@@ -2,7 +2,7 @@ import discord
 import os
 from openai import AsyncOpenAI
 
-client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client_ai = None
 
 intents = discord.Intents.default()
 intents.message_content = True
