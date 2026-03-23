@@ -29,7 +29,8 @@ async def jail_user(member, guild, channel):
 
     # Notify moderators
     if mod_role:
-        await channel.send(f"{mod_role.mention} User {member.mention} has been jailed for review.")
+        await channel.send(f"{mod_role.mention} User {member.mention} has been jailed for review."),
+        delete_after=10
 
 # ------------------ CLEANUP FUNCTION ------------------
 async def cleanup_messages(channel, user):
