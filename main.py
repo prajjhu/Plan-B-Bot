@@ -17,7 +17,7 @@ client = discord.Client(intents=intents)
 user_warnings = {}
 user_last_message_time = {}
 
-WARNING_TIMEOUT = 60
+WARNING_TIMEOUT = 60  # seconds
 
 # ------------------ JAIL FUNCTION ------------------
 async def jail_user(member, guild, channel):
@@ -27,10 +27,11 @@ async def jail_user(member, guild, channel):
     if role:
         await member.add_roles(role)
 
-    # Notify moderators
+    # Notify moderators (auto delete after 10 sec)
     if mod_role:
-        await channel.send(f"{mod_role.mention} User {member.mention} has been jailed for review."),
-        delete_after=10
+        await channel.send(
+            f"{mod_role.mention} User {member.mention} has been jailed for review.",
+            delete_after=10
         )
 
 # ------------------ CLEANUP FUNCTION ------------------
@@ -38,8 +39,7 @@ async def cleanup_messages(channel, user):
     def check(msg):
         return msg.author == user
 
-    deleted = await channel.purge(limit=5, check=check)
-    return deleted
+    await channel.purge(limit=5, check=check)
 
 # ------------------ READY ------------------
 @client.event
@@ -55,7 +55,7 @@ async def on_message(message):
     user_id = str(message.author.id)
     content = message.content.lower()
 
-    # TIME DECAY
+    # ------------------ TIME DECAY ------------------
     current_time = time.time()
 
     if user_id in user_last_message_time:
@@ -64,19 +64,21 @@ async def on_message(message):
 
     user_last_message_time[user_id] = current_time
 
-    # BOT MENTION
+    # ------------------ BOT MENTION ------------------
     if client.user in message.mentions:
-        await message.channel.send("Hey 👋 I'm here. What's up?")
+        await message.channel.send("Hey 👋 I'm here. What's up?", delete_after=5)
         return
 
     # ------------------ COMMANDS ------------------
 
-    if message.content.startswith(PREFIX + "jail"):
+    # =testjail
+    if message.content.startswith(PREFIX + "testjail"):
         if message.author.guild_permissions.administrator:
             await jail_user(message.author, message.guild, message.channel)
             await message.channel.send("Test: You have been jailed.", delete_after=5)
         return
 
+    # =release @user
     if message.content.startswith(PREFIX + "release"):
         if message.author.guild_permissions.administrator:
             if message.mentions:
@@ -87,7 +89,7 @@ async def on_message(message):
                     await message.channel.send(f"{user.mention} has been released.", delete_after=5)
         return
 
-    # ------------------ TEST LOGIC ------------------
+    # ------------------ TEST LOGIC (NO AI) ------------------
 
     if "spamtest" in content:
         result = "MEDIUM"
@@ -130,7 +132,7 @@ async def on_message(message):
 
         if user_warnings[user_id] >= 3:
             await asyncio.sleep(1.5)
-            bot_msg = await message.channel.send(random.choice(guardian_responses), delete_after=5)
+            await message.channel.send(random.choice(guardian_responses), delete_after=5)
             user_warnings[user_id] = 0
 
     # 🔵 Enforcer
@@ -146,5 +148,7 @@ async def on_message(message):
         await message.channel.send(random.choice(sentinel_responses), delete_after=5)
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
+
+    # SAFE → do nothing
 
 client.run(os.getenv("TOKEN"))
