@@ -5,7 +5,7 @@ import time
 import asyncio
 from openai import AsyncOpenAI
 
-# AI (disabled for now safely)
+# AI disabled for now
 client_ai = None
 
 intents = discord.Intents.default()
@@ -14,36 +14,11 @@ intents.members = True
 
 client = discord.Client(intents=intents)
 
-# Memory systems
+# Memory
 user_warnings = {}
 user_last_message_time = {}
 
-WARNING_TIMEOUT = 60  # seconds before warnings reset
-
-# ------------------ AI FUNCTION ------------------
-async def analyze_message(message_content):
-    if not client_ai:
-        return "SAFE"
-
-    response = await client_ai.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a moderation AI.\n"
-                    "SAFE = normal conversation, jokes, sarcasm\n"
-                    "LOW = mild repeated negativity\n"
-                    "MEDIUM = clear harassment or disruption\n"
-                    "HIGH = severe harmful or illegal content\n"
-                    "Respond ONLY with: SAFE, LOW, MEDIUM, or HIGH"
-                )
-            },
-            {"role": "user", "content": message_content}
-        ]
-    )
-
-    return response.choices[0].message.content.strip()
+WARNING_TIMEOUT = 60  # seconds
 
 # ------------------ JAIL FUNCTION ------------------
 async def jail_user(member, guild):
@@ -51,18 +26,19 @@ async def jail_user(member, guild):
     if role:
         await member.add_roles(role)
 
-# ------------------ BOT READY ------------------
+# ------------------ READY ------------------
 @client.event
 async def on_ready():
     print(f'Logged in as {client.user}')
 
-# ------------------ MAIN LOGIC ------------------
+# ------------------ MAIN ------------------
 @client.event
 async def on_message(message):
     if message.author == client.user:
         return
 
     user_id = str(message.author.id)
+    content = message.content.lower()
 
     # ------------------ TIME DECAY ------------------
     current_time = time.time()
@@ -79,7 +55,6 @@ async def on_message(message):
         return
 
     # ------------------ ADMIN COMMANDS ------------------
-
     if message.content == "!testjail":
         if message.author.guild_permissions.administrator:
             await jail_user(message.author, message.guild)
@@ -96,14 +71,17 @@ async def on_message(message):
                     await message.channel.send(f"{user.mention} has been released.")
         return
 
-    # ------------------ AI ANALYSIS ------------------
-    try:
-        result = await analyze_message(message.content)
-    except:
+    # ------------------ TESTING LOGIC (NO AI) ------------------
+    if "spamtest" in content:
+        result = "MEDIUM"
+    elif "serious" in content:
+        result = "HIGH"
+    elif "annoying" in content:
+        result = "LOW"
+    else:
         result = "SAFE"
 
     # ------------------ RESPONSES ------------------
-
     guardian_responses = [
         "Alright, let’s keep it respectful 👍",
         "Let’s not take it too far.",
@@ -128,11 +106,11 @@ async def on_message(message):
 
     # ------------------ LEVEL SYSTEM ------------------
 
-    # 🟢 Guardian (tolerant)
+    # 🟢 Guardian
     if result == "LOW":
         user_warnings[user_id] = user_warnings.get(user_id, 0) + 1
 
-        if user_warnings[user_id] >= 3:  # more tolerance
+        if user_warnings[user_id] >= 3:
             await asyncio.sleep(1.5)
             await message.channel.send(random.choice(guardian_responses))
             user_warnings[user_id] = 0
