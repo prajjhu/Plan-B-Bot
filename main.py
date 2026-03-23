@@ -6,11 +6,8 @@ import asyncio
 
 # ================= CONFIG =================
 PREFIX = "="
-
 JAIL_CHANNELS = ["jail-1", "jail-2"]
-
-WARNING_TIMEOUT = 60  # seconds
-
+WARNING_TIMEOUT = 60
 # ==========================================
 
 intents = discord.Intents.default()
@@ -30,10 +27,9 @@ async def jail_user(member, guild, channel):
     try:
         if role:
             await member.add_roles(role)
-    except:
-        print("Failed to assign jailed role")
+    except Exception as e:
+        print(f"Role assign error: {e}")
 
-    # Notify moderators (auto delete after 10s)
     if mod_role:
         await channel.send(
             f"{mod_role.mention} User {member.mention} has been jailed for review.",
@@ -47,8 +43,8 @@ async def cleanup_messages(channel, user):
 
     try:
         await channel.purge(limit=3, check=check)
-    except:
-        print("Failed to delete messages")
+    except Exception as e:
+        print(f"Cleanup error: {e}")
 
 # ------------------ READY ------------------
 @client.event
@@ -63,8 +59,6 @@ async def on_message(message):
 
     user_id = str(message.author.id)
     content = message.content.lower()
-
-    # Check if jail channel
     is_jail_channel = message.channel.name in JAIL_CHANNELS
 
     # ------------------ TIME DECAY ------------------
@@ -86,7 +80,7 @@ async def on_message(message):
     # ==================================================
     if is_jail_channel:
 
-        # =release ONLY works here
+        # RELEASE COMMAND (ONLY HERE)
         if message.content.startswith(PREFIX + "release"):
             if message.author.guild_permissions.administrator:
                 if message.mentions:
@@ -96,32 +90,36 @@ async def on_message(message):
                     try:
                         if role:
                             await user.remove_roles(role)
+
+                            # delete admin command
+                            await message.delete(delay=5)
+
                             await message.channel.send(
                                 f"{user.mention} has been released.",
                                 delete_after=5
                             )
-                    except:
-                        print("Failed to release user")
-            return
+                    except Exception as e:
+                        print(f"Release error: {e}")
+            return  # 🔥 IMPORTANT
 
-        # Allow free talk, only stop extreme spam/walls
-        if len(message.content) > 400 or message.content.count("\n") > 5:
+        # ONLY spam/wall detection
+        if len(message.content) > 200 or message.content.count("\n") > 5:
             try:
                 await message.delete()
                 await message.channel.send(
                     "Let’s keep messages reasonable here.",
                     delete_after=5
                 )
-            except:
-                print("Failed to moderate jail spam")
+            except Exception as e:
+                print(f"Jail moderation error: {e}")
 
-        return  # skip all other moderation in jail
+        return  # 🔥 FULL STOP (no other moderation)
 
     # ==================================================
     # 🌍 NORMAL CHANNELS
     # ==================================================
 
-    # =testjail (admin only)
+    # TEST COMMAND
     if message.content.startswith(PREFIX + "testjail"):
         if message.author.guild_permissions.administrator:
             await jail_user(message.author, message.guild, message.channel)
@@ -131,7 +129,7 @@ async def on_message(message):
             )
         return
 
-    # ------------------ TEST LOGIC (TEMP) ------------------
+    # ------------------ TEST LOGIC ------------------
     if "spamtest" in content:
         result = "MEDIUM"
     elif "serious" in content:
@@ -166,7 +164,6 @@ async def on_message(message):
 
     # ------------------ LEVEL SYSTEM ------------------
 
-    # 🟢 Guardian
     if result == "LOW":
         user_warnings[user_id] = user_warnings.get(user_id, 0) + 1
 
@@ -178,7 +175,6 @@ async def on_message(message):
             )
             user_warnings[user_id] = 0
 
-    # 🔵 Enforcer
     elif result == "MEDIUM":
         await asyncio.sleep(1.5)
         await message.channel.send(
@@ -188,7 +184,6 @@ async def on_message(message):
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
 
-    # 🔴 Sentinel
     elif result == "HIGH":
         await asyncio.sleep(1.5)
         await message.channel.send(
@@ -197,7 +192,5 @@ async def on_message(message):
         )
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
-
-    # SAFE → do nothing
 
 client.run(os.getenv("TOKEN"))
