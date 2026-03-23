@@ -4,9 +4,14 @@ import random
 import time
 import asyncio
 
+# ================= CONFIG =================
 PREFIX = "="
 
-client_ai = None
+JAIL_CHANNELS = ["jail-1", "jail-2"]
+
+WARNING_TIMEOUT = 60  # seconds
+
+# ==========================================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,17 +22,18 @@ client = discord.Client(intents=intents)
 user_warnings = {}
 user_last_message_time = {}
 
-WARNING_TIMEOUT = 60  # seconds
-
 # ------------------ JAIL FUNCTION ------------------
 async def jail_user(member, guild, channel):
     role = discord.utils.get(guild.roles, name="Jailed")
     mod_role = discord.utils.get(guild.roles, name="Moderator")
 
-    if role:
-        await member.add_roles(role)
+    try:
+        if role:
+            await member.add_roles(role)
+    except:
+        print("Failed to assign jailed role")
 
-    # Notify moderators (auto delete after 10 sec)
+    # Notify moderators (auto delete after 10s)
     if mod_role:
         await channel.send(
             f"{mod_role.mention} User {member.mention} has been jailed for review.",
@@ -39,7 +45,10 @@ async def cleanup_messages(channel, user):
     def check(msg):
         return msg.author == user
 
-    await channel.purge(limit=5, check=check)
+    try:
+        await channel.purge(limit=3, check=check)
+    except:
+        print("Failed to delete messages")
 
 # ------------------ READY ------------------
 @client.event
@@ -55,6 +64,9 @@ async def on_message(message):
     user_id = str(message.author.id)
     content = message.content.lower()
 
+    # Check if jail channel
+    is_jail_channel = message.channel.name in JAIL_CHANNELS
+
     # ------------------ TIME DECAY ------------------
     current_time = time.time()
 
@@ -69,28 +81,57 @@ async def on_message(message):
         await message.channel.send("Hey 👋 I'm here. What's up?", delete_after=5)
         return
 
-    # ------------------ COMMANDS ------------------
+    # ==================================================
+    # 🔒 JAIL CHANNEL LOGIC
+    # ==================================================
+    if is_jail_channel:
 
-    # =testjail
+        # =release ONLY works here
+        if message.content.startswith(PREFIX + "release"):
+            if message.author.guild_permissions.administrator:
+                if message.mentions:
+                    user = message.mentions[0]
+                    role = discord.utils.get(message.guild.roles, name="Jailed")
+
+                    try:
+                        if role:
+                            await user.remove_roles(role)
+                            await message.channel.send(
+                                f"{user.mention} has been released.",
+                                delete_after=5
+                            )
+                    except:
+                        print("Failed to release user")
+            return
+
+        # Allow free talk, only stop extreme spam/walls
+        if len(message.content) > 400 or message.content.count("\n") > 5:
+            try:
+                await message.delete()
+                await message.channel.send(
+                    "Let’s keep messages reasonable here.",
+                    delete_after=5
+                )
+            except:
+                print("Failed to moderate jail spam")
+
+        return  # skip all other moderation in jail
+
+    # ==================================================
+    # 🌍 NORMAL CHANNELS
+    # ==================================================
+
+    # =testjail (admin only)
     if message.content.startswith(PREFIX + "testjail"):
         if message.author.guild_permissions.administrator:
             await jail_user(message.author, message.guild, message.channel)
-            await message.channel.send("Test: You have been jailed.", delete_after=5)
+            await message.channel.send(
+                "Test: You have been jailed.",
+                delete_after=5
+            )
         return
 
-    # =release @user
-    if message.content.startswith(PREFIX + "release"):
-        if message.author.guild_permissions.administrator:
-            if message.mentions:
-                user = message.mentions[0]
-                role = discord.utils.get(message.guild.roles, name="Jailed")
-                if role:
-                    await user.remove_roles(role)
-                    await message.channel.send(f"{user.mention} has been released.", delete_after=5)
-        return
-
-    # ------------------ TEST LOGIC (NO AI) ------------------
-
+    # ------------------ TEST LOGIC (TEMP) ------------------
     if "spamtest" in content:
         result = "MEDIUM"
     elif "serious" in content:
@@ -101,7 +142,6 @@ async def on_message(message):
         result = "SAFE"
 
     # ------------------ RESPONSES ------------------
-
     guardian_responses = [
         "Alright, let’s keep it respectful 👍",
         "Let’s not take it too far.",
@@ -132,20 +172,29 @@ async def on_message(message):
 
         if user_warnings[user_id] >= 3:
             await asyncio.sleep(1.5)
-            await message.channel.send(random.choice(guardian_responses), delete_after=5)
+            await message.channel.send(
+                random.choice(guardian_responses),
+                delete_after=5
+            )
             user_warnings[user_id] = 0
 
     # 🔵 Enforcer
     elif result == "MEDIUM":
         await asyncio.sleep(1.5)
-        await message.channel.send(random.choice(enforcer_responses), delete_after=5)
+        await message.channel.send(
+            random.choice(enforcer_responses),
+            delete_after=5
+        )
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
 
     # 🔴 Sentinel
     elif result == "HIGH":
         await asyncio.sleep(1.5)
-        await message.channel.send(random.choice(sentinel_responses), delete_after=5)
+        await message.channel.send(
+            random.choice(sentinel_responses),
+            delete_after=5
+        )
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
 
