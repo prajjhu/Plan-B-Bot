@@ -3,7 +3,9 @@ import os
 import random
 import time
 import asyncio
-from openai import AsyncOpenAI
+
+# Prefix
+PREFIX = "="
 
 # AI disabled for now
 client_ai = None
@@ -54,14 +56,17 @@ async def on_message(message):
         await message.channel.send("Hey 👋 I'm here. What's up?")
         return
 
-    # ------------------ ADMIN COMMANDS ------------------
-    if message.content == "!testjail":
+    # ------------------ COMMAND SYSTEM ------------------
+
+    # =testjail
+    if message.content.startswith(PREFIX + "testjail"):
         if message.author.guild_permissions.administrator:
             await jail_user(message.author, message.guild)
             await message.channel.send("Test: You have been jailed.")
         return
 
-    if message.content.startswith("!release"):
+    # =release @user
+    if message.content.startswith(PREFIX + "release"):
         if message.author.guild_permissions.administrator:
             if message.mentions:
                 user = message.mentions[0]
@@ -82,6 +87,7 @@ async def on_message(message):
         result = "SAFE"
 
     # ------------------ RESPONSES ------------------
+
     guardian_responses = [
         "Alright, let’s keep it respectful 👍",
         "Let’s not take it too far.",
