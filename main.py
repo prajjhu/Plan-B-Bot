@@ -17,8 +17,8 @@ GENERAL_CHANNEL_NAME = "chat"
 
 SIMILARITY_THRESHOLD = 0.85
 
-# 🧠 NEW: how many past messages to remember
-CONTEXT_LIMIT = 5
+# 🧠 REDUCED CONTEXT (LESS AGGRESSIVE)
+CONTEXT_LIMIT = 3
 # ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -39,7 +39,6 @@ user_high_strikes = {}
 
 user_jail_lock = {}
 
-# 🧠 NEW: conversational memory
 user_context = {}
 
 # ================= PERSONALITY =================
@@ -82,17 +81,20 @@ async def log_action(guild,title,desc):
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
-TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
+TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid"]
 
 # ================= AI =================
-async def analyze(uid, text):
+async def analyze(uid, text, use_context=True):
     try:
-        # 🧠 BUILD CONTEXT
-        history = user_context.get(uid, [])
-        context_text = "\n".join(history[:-1])  # previous messages only
+        context_text = ""
+
+        # 🧠 ONLY USE CONTEXT WHEN NEEDED
+        if use_context:
+            history = user_context.get(uid, [])
+            context_text = "\n".join(history[:-1])
 
         prompt = f"""
-Previous messages from user:
+Previous messages:
 {context_text}
 
 Current message:
@@ -105,13 +107,19 @@ Current message:
                 {
                     "role":"system",
                     "content":(
-                        "You are an advanced moderation AI.\n"
-                        "Understand context, intent, escalation, and repeated behavior.\n\n"
-                        "SAFE = normal/joking\n"
-                        "MEDIUM = insults, harassment\n"
-                        "HIGH = threats, hate speech, telling someone to die\n\n"
-                        "Repeated toxicity increases severity.\n"
-                        "Targeting groups = HIGH.\n\n"
+                        "You are a moderation AI for a chill social Discord server.\n\n"
+
+                        "SAFE = casual language, jokes, slang, swearing\n"
+                        "MEDIUM = repeated or targeted insults\n"
+                        "HIGH = clear threats, hate speech, or serious harassment\n\n"
+
+                        "IMPORTANT RULES:\n"
+                        "- Do NOT punish casual swearing\n"
+                        "- Do NOT punish friendly banter\n"
+                        "- Do NOT overreact to single messages\n"
+                        "- Only escalate if behavior is clearly repeated or harmful\n"
+                        "- Only return HIGH if it is serious and intentional\n\n"
+
                         "Return ONLY: SAFE, MEDIUM, HIGH"
                     )
                 },
@@ -177,14 +185,13 @@ async def on_message(message):
 
     # 👀 BOT PRESENCE
     if client.user in message.mentions:
-        responses = [
+        await message.channel.send(random.choice([
             "yeah i’m watching 👀",
             "all systems running",
             "i see everything",
             "nothing escapes me",
             "you good?"
-        ]
-        await message.channel.send(random.choice(responses), delete_after=5)
+        ]), delete_after=5)
         return
 
     uid = str(message.author.id)
@@ -221,17 +228,14 @@ async def on_message(message):
     if content.startswith(PREFIX + "chat"):
 
         if message.channel.name != AI_CHANNEL_NAME:
-            await message.channel.send(
-                "AI chat is disabled here, head over to #ai-chat 🤖",
-                delete_after=5
-            )
+            await message.channel.send("Go to #ai-chat 🤖", delete_after=5)
             return
 
         role = discord.utils.get(message.guild.roles, name="AI Access")
 
         if role not in message.author.roles:
             await message.channel.send(
-                "you don’t have access to AI chat, dm @ap.snake for the role 🔐",
+                "you don’t have access to AI chat, dm @ap.snake 🔐",
                 delete_after=5
             )
             return
@@ -268,30 +272,28 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
-    # ===== AI MOD (NOW CONTEXT-AWARE) =====
+    # ===== AI MOD (SMART + LESS AGGRESSIVE) =====
     if len(content) > 5:
 
-        result = await analyze(uid, message.content)
+        use_context = any(w in content for w in TRIGGERS)
+
+        result = await analyze(uid, message.content, use_context)
 
         if result == "MEDIUM":
             s = user_medium_strikes.get(uid, 0) + 1
             user_medium_strikes[uid] = s
 
-            if s < 3:
-                await message.channel.send(bot_reply("warn"), delete_after=5)
-            else:
+            if s >= 5:
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Harassment")
                 user_medium_strikes[uid] = 0
             return
 
-        if result == "HIGH":
+        if result == "HIGH" and any(w in content for w in TRIGGERS):
             s = user_high_strikes.get(uid, 0) + 1
             user_high_strikes[uid] = s
 
-            if s < 3:
-                await message.channel.send(bot_reply("serious"), delete_after=5)
-            else:
+            if s >= 2:
                 await cleanup_spam(message.channel, message.author, content)
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Severe behavior")
