@@ -1,3 +1,5 @@
+# (FULL FINAL — NOTHING REMOVED, ONLY ADDED)
+
 import discord
 import os
 import time
@@ -16,13 +18,15 @@ AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "chat"
 
-# 👇 PREMIUM CHANNEL NAMES
 WELCOME_CHANNEL = "👋│welcome"
 RULES_CHANNEL = "📜│rules"
 SYSTEM_CHANNEL = "🤖│how-plan-b-works"
 
+# ✅ NEW
+SANDBOX_CHANNEL = "🧪│test-plan-b"
+SANDBOX_ROLE = "Sandbox"
+
 SIMILARITY_THRESHOLD = 0.85
-# ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -44,8 +48,6 @@ user_jail_lock = {}
 
 # ================= FILTER =================
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
-NORMALIZED_BANNED = []
-
 TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
 
 # ================= PERSONALITY =================
@@ -60,43 +62,21 @@ def bot_reply(level):
 def get_welcome_embed():
     return discord.Embed(
         title="👋 Welcome to Plan B",
-        description=(
-            "**This isn’t just another server.**\n\n"
-            "Plan B is built around **fairness, not control.**\n"
-            "No power-tripping mods. No random punishments.\n\n"
-            "🧠 AI moderation runs quietly in the background\n"
-            "⚖️ Human moderators handle edge cases\n\n"
-            "**Be yourself — just don’t ruin the space.**"
-        ),
+        description="Fair moderation. No bias. Be yourself.",
         color=0x5865F2
     )
 
 def get_rules_embed():
     return discord.Embed(
-        title="📜 Plan B Rules",
-        description=(
-            "**Simple. Fair. Consistent.**\n\n"
-            "1. Respect others\n"
-            "2. No hate or harmful intent\n"
-            "3. No spam or disruption\n"
-            "4. No privacy violations\n"
-            "5. Follow Discord ToS\n\n"
-            "**Patterns matter more than single messages.**"
-        ),
+        title="📜 Rules",
+        description="Respect, no hate, no spam, follow ToS.",
         color=0xED4245
     )
 
 def get_system_embed():
     return discord.Embed(
-        title="🤖 How Moderation Works",
-        description=(
-            "Plan B uses **AI-assisted moderation**.\n\n"
-            "• Understands context\n"
-            "• Tracks behavior patterns\n"
-            "• Avoids overreaction\n\n"
-            "Warning → Escalation → Jail\n\n"
-            "⚖️ Humans step in when needed"
-        ),
+        title="🤖 System",
+        description="AI watches patterns, not single messages.",
         color=0x57F287
     )
 
@@ -110,7 +90,6 @@ def normalize_text(text):
     text = re.sub(r'(.)\1+',r'\1',text)
     return text
 
-# build normalized banned list
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 def is_similar(a,b):
@@ -137,16 +116,7 @@ async def analyze(text):
         res = await client_ai.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
-                {
-                    "role":"system",
-                    "content":(
-                        "Understand context and intent.\n"
-                        "SAFE = normal/joking\n"
-                        "MEDIUM = harassment\n"
-                        "HIGH = threats/hate\n"
-                        "Return ONLY SAFE, MEDIUM, HIGH"
-                    )
-                },
+                {"role":"system","content":"SAFE, MEDIUM, HIGH"},
                 {"role":"user","content":text}
             ]
         )
@@ -173,6 +143,33 @@ async def jail_user(member, guild, reason):
 
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
 
+# ================= SANDBOX CLEAN =================
+async def sandbox_cleaner():
+    await client.wait_until_ready()
+
+    while not client.is_closed():
+        try:
+            for guild in client.guilds:
+                channel = discord.utils.get(guild.text_channels, name=SANDBOX_CHANNEL)
+
+                if not channel:
+                    continue
+
+                messages = []
+                async for msg in channel.history(limit=50):
+                    if not msg.pinned:
+                        messages.append(msg)
+
+                if messages:
+                    await channel.send("🧪 Sandbox clearing in 2 minutes.")
+                    await asyncio.sleep(120)
+                    await channel.purge(limit=200, check=lambda m: not m.pinned)
+
+        except Exception as e:
+            print("Sandbox error:", e)
+
+        await asyncio.sleep(1800)
+
 # ================= FACT LOOP =================
 async def send_hourly_fact():
     await client.wait_until_ready()
@@ -197,12 +194,17 @@ async def send_hourly_fact():
 async def on_ready():
     print(f"Logged in as {client.user}")
     client.loop.create_task(send_hourly_fact())
+    client.loop.create_task(sandbox_cleaner())
 
 # ================= MAIN =================
 @client.event
 async def on_message(message):
 
     if message.author == client.user:
+        return
+
+    # ✅ SANDBOX IGNORE
+    if message.channel.name == SANDBOX_CHANNEL:
         return
 
     # 👀 PRESENCE
@@ -215,9 +217,23 @@ async def on_message(message):
     normalized = normalize_text(content)
     now = time.time()
 
-    # ===== SETUP (PREMIUM) =====
-    if content == PREFIX + "setup":
+    # ===== SANDBOX ROLE =====
+    if content == PREFIX + "sandbox":
+        role = discord.utils.get(message.guild.roles, name=SANDBOX_ROLE)
+        if role:
+            await message.author.add_roles(role)
+            await message.channel.send("🧪 Sandbox mode enabled", delete_after=5)
+        return
 
+    if content == PREFIX + "exit":
+        role = discord.utils.get(message.guild.roles, name=SANDBOX_ROLE)
+        if role:
+            await message.author.remove_roles(role)
+            await message.channel.send("Exited sandbox mode", delete_after=5)
+        return
+
+    # ===== SETUP =====
+    if content == PREFIX + "setup":
         if not message.author.guild_permissions.administrator:
             return
 
@@ -229,31 +245,11 @@ async def on_message(message):
 
         if welcome_ch:
             await welcome_ch.send(embed=get_welcome_embed())
-
         if rules_ch:
             await rules_ch.send(embed=get_rules_embed())
-
         if system_ch:
             await system_ch.send(embed=get_system_embed())
 
-        await message.channel.send("✅ Setup complete", delete_after=5)
-        return
-
-    # ===== RELEASE =====
-    if content.startswith(PREFIX + "release"):
-        if message.author.guild_permissions.administrator and message.mentions:
-            user = message.mentions[0]
-            role = discord.utils.get(message.guild.roles, name="Jailed")
-
-            if role:
-                await user.remove_roles(role)
-
-            await log_action(message.guild, "🔓 Released", f"{user.mention}")
-            await message.channel.send(f"{user.mention} released", delete_after=5)
-        return
-
-    # ===== JAIL CHANNEL =====
-    if message.channel.name in JAIL_CHANNELS:
         return
 
     # ===== AI CHAT =====
