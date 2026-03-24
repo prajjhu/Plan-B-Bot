@@ -8,7 +8,6 @@ from openai import AsyncOpenAI
 # ================= CONFIG =================
 PREFIX = "="
 JAIL_CHANNELS = ["jail-1", "jail-2"]
-WARNING_TIMEOUT = 60
 COOLDOWN_TIME = 5
 # ==========================================
 
@@ -107,7 +106,10 @@ async def jail_user(member, guild, channel):
             pass
 
     if mod_role:
-        await channel.send(f"{mod_role.mention} {member.mention} jailed.", delete_after=10)
+        await channel.send(
+            f"{mod_role.mention} {member.mention} jailed.",
+            delete_after=10
+        )
 
 # ------------------ CLEANUP ------------------
 async def cleanup_messages(channel, user):
@@ -136,7 +138,7 @@ async def on_message(message):
     now = time.time()
     is_jail = message.channel.name in JAIL_CHANNELS
 
-    # ------------------ COOLDOWN CHECK ------------------
+    # ------------------ COOLDOWN ------------------
     in_cooldown = user_id in user_cooldowns and now < user_cooldowns[user_id]
 
     # ------------------ MENTION ------------------
@@ -160,7 +162,10 @@ async def on_message(message):
                     user_offense_count[str(user.id)] = 0
 
                     await message.delete(delay=5)
-                    await message.channel.send(f"{user.mention} released.", delete_after=5)
+                    await message.channel.send(
+                        f"{user.mention} released.",
+                        delete_after=5
+                    )
             return
 
         if len(content) > 250 or content.count("\n") > 5:
@@ -199,7 +204,7 @@ async def on_message(message):
         return
 
     # ==================================================
-    # 🧠 AI CONTEXT MODERATION
+    # 🧠 AI CONTEXT
     # ==================================================
     if any(p in content for p in SEVERE_PHRASES):
         result = await analyze_message(message.content)
@@ -211,7 +216,7 @@ async def on_message(message):
             return
 
     # ==================================================
-    # 🧩 SPAM SYSTEM
+    # 🧩 SPAM SYSTEM (FIXED)
     # ==================================================
     user_last_content.setdefault(user_id, content)
     user_repeat_count[user_id] = user_repeat_count.get(user_id, 0)
@@ -224,18 +229,23 @@ async def on_message(message):
 
     if user_repeat_count[user_id] >= 5:
 
+        # 🔥 FIX: cooldown now IGNORES instead of punishes
         if in_cooldown:
-            await message.channel.send("bro you just got warned 😭", delete_after=5)
-            await cleanup_messages(message.channel, message.author)
-            await jail_user(message.author, message.guild, message.channel)
             return
 
         user_offense_count[user_id] = user_offense_count.get(user_id, 0) + 1
 
-        if user_offense_count[user_id] < 3:
+        if user_offense_count[user_id] == 1:
             await message.channel.send("stop spamming bro", delete_after=5)
+
+        elif user_offense_count[user_id] == 2:
+            await message.channel.send("last warning fr", delete_after=5)
+
         else:
-            await message.channel.send("you’ve been spamming repeatedly, take a break.", delete_after=5)
+            await message.channel.send(
+                "you’ve been spamming repeatedly, take a break.",
+                delete_after=5
+            )
             await cleanup_messages(message.channel, message.author)
             await jail_user(message.author, message.guild, message.channel)
             user_offense_count[user_id] = 0
@@ -245,7 +255,7 @@ async def on_message(message):
         return
 
     # ==================================================
-    # ⚡ FLOOD DETECTION
+    # ⚡ FLOOD
     # ==================================================
     user_message_times.setdefault(user_id, []).append(now)
     user_message_times[user_id] = [t for t in user_message_times[user_id] if now - t < 5]
@@ -257,7 +267,7 @@ async def on_message(message):
         return
 
     # ==================================================
-    # 📈 ESCALATION SYSTEM
+    # 📈 ESCALATION
     # ==================================================
     user_recent_messages.setdefault(user_id, []).append(content)
     user_recent_messages[user_id] = user_recent_messages[user_id][-5:]
