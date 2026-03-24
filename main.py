@@ -3,12 +3,14 @@ import os
 import random
 import time
 import re
+from difflib import SequenceMatcher
 from openai import AsyncOpenAI
 
 # ================= CONFIG =================
 PREFIX = "="
 JAIL_CHANNELS = ["jail-1", "jail-2"]
 COOLDOWN_TIME = 5
+SIMILARITY_THRESHOLD = 0.85
 # ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -35,6 +37,19 @@ def reset_user_state(user_id):
     user_message_times.pop(user_id, None)
     user_recent_messages.pop(user_id, None)
 
+# ------------------ SIMILARITY ------------------
+def is_similar(a, b):
+    return SequenceMatcher(None, a, b).ratio() >= SIMILARITY_THRESHOLD
+
+# ------------------ CLEANUP (SMART) ------------------
+async def cleanup_spam(channel, user, reference, limit=30):
+    def check(msg):
+        return msg.author == user and is_similar(msg.content.lower(), reference.lower())
+    try:
+        await channel.purge(limit=limit, check=check)
+    except:
+        pass
+
 # ------------------ SENTINEL ------------------
 INSTANT_JAIL_WORDS = [
     "nigger", "faggot", "rape", "pedophile",
@@ -42,16 +57,21 @@ INSTANT_JAIL_WORDS = [
 ]
 
 SEVERE_PHRASES = [
-    "kill yourself",
-    "fucking die",
-    "nobody loves you",
-    "suicide"
+    "kill yourself", "fucking die", "nobody loves you", "suicide"
+]
+
+AI_TRIGGER_WORDS = [
+    "idiot", "retard", "fuck you", "bitch",
+    "nigga", "kill", "die", "hate", "stupid"
 ]
 
 # ------------------ NORMALIZE ------------------
 def normalize_text(text):
     text = text.lower()
-    replacements = {"@": "a", "4": "a", "0": "o", "1": "i", "$": "s"}
+    replacements = {
+        "@": "a", "4": "a", "0": "o",
+        "1": "i", "3": "e", "$": "s", "!": "i"
+    }
     for k, v in replacements.items():
         text = text.replace(k, v)
     text = re.sub(r'[\W_]+', '', text)
@@ -66,7 +86,7 @@ def random_reply(level):
         "severe": ["nah… not happening", "yeah that crossed the line"]
     }[level])
 
-# ------------------ AI MODERATION ------------------
+# ------------------ AI ------------------
 async def analyze_message(text):
     try:
         res = await client_ai.chat.completions.create(
@@ -75,11 +95,13 @@ async def analyze_message(text):
                 {
                     "role": "system",
                     "content": (
-                        "You are a lenient moderation AI.\n"
+                        "You are a VERY lenient moderation AI.\n"
+                        "Context matters more than words.\n"
                         "SAFE = friendly/joking\n"
                         "LOW = mild negativity\n"
                         "MEDIUM = harassment\n"
                         "HIGH = threats\n"
+                        "If friendly → SAFE.\n"
                         "Respond ONLY SAFE, LOW, MEDIUM, HIGH"
                     )
                 },
@@ -108,15 +130,6 @@ async def jail_user(member, guild, channel):
     if mod_role:
         await channel.send(f"{mod_role.mention} {member.mention} jailed.", delete_after=10)
 
-# ------------------ CLEANUP ------------------
-async def cleanup_messages(channel, user):
-    def check(msg):
-        return msg.author == user
-    try:
-        await channel.purge(limit=5, check=check)
-    except:
-        pass
-
 # ------------------ READY ------------------
 @client.event
 async def on_ready():
@@ -142,11 +155,8 @@ async def on_message(message):
         await message.channel.send("yo 👋", delete_after=5)
         return
 
-    # ==================================================
-    # 🔓 GLOBAL RELEASE COMMAND (FIXED)
-    # ==================================================
+    # ------------------ RELEASE ------------------
     if content.startswith(PREFIX + "release"):
-
         if not message.author.guild_permissions.administrator:
             return
 
@@ -155,37 +165,25 @@ async def on_message(message):
             role = discord.utils.get(message.guild.roles, name="Jailed")
 
             if role:
-                try:
-                    await user.remove_roles(role)
+                await user.remove_roles(role)
+                reset_user_state(str(user.id))
+                user_offense_count[str(user.id)] = 0
 
-                    reset_user_state(str(user.id))
-                    user_offense_count[str(user.id)] = 0
-
-                    await message.delete(delay=5)
-
-                    await message.channel.send(
-                        f"{user.mention} has been released.",
-                        delete_after=5
-                    )
-
-                except Exception as e:
-                    print(f"Release error: {e}")
-
+                await message.delete(delay=5)
+                await message.channel.send(
+                    f"{user.mention} has been released.",
+                    delete_after=5
+                )
         return
 
-    # ==================================================
-    # 🔒 JAIL CHANNEL
-    # ==================================================
+    # ------------------ JAIL CHANNEL ------------------
     if is_jail:
         if len(content) > 250 or content.count("\n") > 5:
             await message.delete()
         return
 
-    # ==================================================
-    # 🤖 AI CHAT
-    # ==================================================
+    # ------------------ AI CHAT ------------------
     if content.startswith(PREFIX + "chat"):
-
         role = discord.utils.get(message.guild.roles, name="AI Access")
         if role not in message.author.roles:
             return
@@ -200,38 +198,52 @@ async def on_message(message):
             ]
         )
 
-        await message.channel.send(res.choices[0].message.content[:2000])
+        reply = res.choices[0].message.content
+        if random.random() < 0.2:
+            reply += random.choice([" 😄", " ngl", " fr", " 👀"])
+
+        await message.channel.send(reply[:2000])
         return
 
-    # ==================================================
-    # 🔴 SENTINEL
-    # ==================================================
-    if any(w in content or w in normalized for w in INSTANT_JAIL_WORDS):
+    # ------------------ SENTINEL ------------------
+    if any(w in normalized for w in INSTANT_JAIL_WORDS):
         await message.delete()
-        await cleanup_messages(message.channel, message.author)
+        await cleanup_spam(message.channel, message.author, content)
         await jail_user(message.author, message.guild, message.channel)
         return
 
-    # ==================================================
-    # 🧠 AI CONTEXT
-    # ==================================================
-    if any(p in content for p in SEVERE_PHRASES):
+    # ------------------ AI INTENT ------------------
+    if any(w in content for w in AI_TRIGGER_WORDS):
         result = await analyze_message(message.content)
 
-        if result in ["MEDIUM", "HIGH"]:
-            await message.channel.send(random_reply("severe"), delete_after=5)
-            await cleanup_messages(message.channel, message.author)
+        if result == "MEDIUM":
+            await message.channel.send(random_reply("enforce"), delete_after=5)
+            await cleanup_spam(message.channel, message.author, content)
             await jail_user(message.author, message.guild, message.channel)
             return
 
-    # ==================================================
-    # 🧩 SPAM SYSTEM
-    # ==================================================
-    user_last_content.setdefault(user_id, content)
-    user_repeat_count[user_id] = user_repeat_count.get(user_id, 0)
+        elif result == "HIGH":
+            await message.delete()
+            await message.channel.send(random_reply("severe"), delete_after=5)
+            await cleanup_spam(message.channel, message.author, content)
+            await jail_user(message.author, message.guild, message.channel)
+            return
 
-    if user_last_content[user_id] == content:
-        user_repeat_count[user_id] += 1
+    # ------------------ BURST SPAM ------------------
+    user_message_times.setdefault(user_id, []).append(now)
+    user_message_times[user_id] = [t for t in user_message_times[user_id] if now - t < 3]
+
+    if len(user_message_times[user_id]) >= 7:
+        await message.channel.send("bro relax 💀", delete_after=5)
+        await cleanup_spam(message.channel, message.author, content)
+        await jail_user(message.author, message.guild, message.channel)
+        return
+
+    # ------------------ SIMILAR SPAM ------------------
+    last = user_last_content.get(user_id)
+
+    if last and is_similar(last, content):
+        user_repeat_count[user_id] = user_repeat_count.get(user_id, 0) + 1
     else:
         user_last_content[user_id] = content
         user_repeat_count[user_id] = 1
@@ -254,7 +266,7 @@ async def on_message(message):
                 "you’ve been spamming repeatedly, take a break.",
                 delete_after=5
             )
-            await cleanup_messages(message.channel, message.author)
+            await cleanup_spam(message.channel, message.author, content)
             await jail_user(message.author, message.guild, message.channel)
             user_offense_count[user_id] = 0
 
@@ -262,21 +274,7 @@ async def on_message(message):
         user_cooldowns[user_id] = time.time() + COOLDOWN_TIME
         return
 
-    # ==================================================
-    # ⚡ FLOOD
-    # ==================================================
-    user_message_times.setdefault(user_id, []).append(now)
-    user_message_times[user_id] = [t for t in user_message_times[user_id] if now - t < 5]
-
-    if len(user_message_times[user_id]) >= 6:
-        await message.channel.send("slow down fr", delete_after=5)
-        await cleanup_messages(message.channel, message.author)
-        await jail_user(message.author, message.guild, message.channel)
-        return
-
-    # ==================================================
-    # 📈 ESCALATION
-    # ==================================================
+    # ------------------ ESCALATION ------------------
     user_recent_messages.setdefault(user_id, []).append(content)
     user_recent_messages[user_id] = user_recent_messages[user_id][-5:]
 
@@ -285,7 +283,7 @@ async def on_message(message):
     if any(w in combined for w in ["idiot", "retard", "fuck you"]):
         if len(user_recent_messages[user_id]) >= 5:
             await message.channel.send(random_reply("enforce"), delete_after=5)
-            await cleanup_messages(message.channel, message.author)
+            await cleanup_spam(message.channel, message.author, content)
             await jail_user(message.author, message.guild, message.channel)
             return
 
