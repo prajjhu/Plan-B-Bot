@@ -65,20 +65,20 @@ def normalize_text(text):
 def random_reply(level):
     return random.choice({
         "warn": [
-            "Easy there.",
-            "Let’s keep it chill.",
-            "No need for that.",
-            "Keep it respectful."
+            "easy there 😅",
+            "let’s chill a bit",
+            "no need for that fr",
+            "keep it respectful yeah"
         ],
         "enforce": [
-            "That’s getting out of hand.",
-            "You’re pushing it now.",
-            "Let’s stop here."
+            "alright that’s enough now",
+            "you’re pushing it ngl",
+            "cut it out"
         ],
         "severe": [
-            "Yeah… not happening.",
-            "That crosses the line.",
-            "Nope. Not allowed."
+            "nah… not happening",
+            "yeah that crossed the line",
+            "we’re not doing that here"
         ]
     }[level])
 
@@ -162,7 +162,7 @@ async def on_message(message):
 
     # ------------------ MENTION ------------------
     if client.user in message.mentions:
-        await message.channel.send("Hey 👋", delete_after=5)
+        await message.channel.send("yo 👋", delete_after=5)
         return
 
     # ==================================================
@@ -189,7 +189,7 @@ async def on_message(message):
         return
 
     # ==================================================
-    # 🤖 AI CHAT
+    # 🤖 AI CHAT (UPGRADED 🔥)
     # ==================================================
     if content.startswith(PREFIX + "chat"):
 
@@ -204,12 +204,29 @@ async def on_message(message):
         res = await client_ai.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": "You are friendly."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a smart, chill, Gen Z-style assistant in a Discord server.\n\n"
+                        "Talk like a real person, not a robot.\n"
+                        "Be casual, slightly witty, and natural.\n"
+                        "Use light slang when appropriate (like 'ngl', 'fr', 'lowkey') but don't overdo it.\n"
+                        "Keep responses engaging and easy to read.\n"
+                        "Avoid being overly formal or too long.\n\n"
+                        "You are friendly, confident, and human-like."
+                    )
+                },
                 {"role": "user", "content": prompt}
             ]
         )
 
-        await message.channel.send(res.choices[0].message.content[:2000])
+        reply = res.choices[0].message.content
+
+        # slight randomness feel
+        if random.random() < 0.2:
+            reply += random.choice([" 😄", " 👀", " ngl", " fr"])
+
+        await message.channel.send(reply[:2000])
         return
 
     # ==================================================
@@ -247,7 +264,6 @@ async def on_message(message):
     # 🧩 BEHAVIOR SYSTEM
     # ==================================================
 
-    # Repeat spam
     user_last_content.setdefault(user_id, content)
     user_repeat_count[user_id] = user_repeat_count.get(user_id, 0)
 
@@ -258,23 +274,21 @@ async def on_message(message):
         user_repeat_count[user_id] = 1
 
     if user_repeat_count[user_id] >= 5:
-        await message.channel.send("Stop spamming.", delete_after=5)
+        await message.channel.send("stop spamming bro", delete_after=5)
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
         user_repeat_count[user_id] = 0
         return
 
-    # Flood
     user_message_times.setdefault(user_id, []).append(now)
     user_message_times[user_id] = [t for t in user_message_times[user_id] if now - t < 5]
 
     if len(user_message_times[user_id]) >= 6:
-        await message.channel.send("Slow down.", delete_after=5)
+        await message.channel.send("slow down fr", delete_after=5)
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
         return
 
-    # Escalation (IMPORTANT ADD BACK)
     user_recent_messages.setdefault(user_id, []).append(content)
     user_recent_messages[user_id] = user_recent_messages[user_id][-5:]
 
