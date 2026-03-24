@@ -147,6 +147,38 @@ async def on_message(message):
         return
 
     # ==================================================
+# 🔓 GLOBAL RELEASE COMMAND (WORKS EVERYWHERE)
+# ==================================================
+if content.startswith(PREFIX + "release"):
+
+    if not message.author.guild_permissions.administrator:
+        return
+
+    if message.mentions:
+        user = message.mentions[0]
+        role = discord.utils.get(message.guild.roles, name="Jailed")
+
+        if role:
+            try:
+                await user.remove_roles(role)
+
+                # 🔥 RESET USER STATE
+                reset_user_state(str(user.id))
+                user_offense_count[str(user.id)] = 0
+
+                # delete command after 5 sec
+                await message.delete(delay=5)
+
+                await message.channel.send(
+                    f"{user.mention} has been released.",
+                    delete_after=5
+                )
+
+            except Exception as e:
+                print(f"Release error: {e}")
+                return
+
+    # ==================================================
     # 🔒 JAIL CHANNEL
     # ==================================================
     if is_jail:
