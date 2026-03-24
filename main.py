@@ -39,10 +39,54 @@ user_jail_lock = {}
 # ================= PERSONALITY =================
 def bot_reply(level):
     return random.choice({
-        "warn": ["easy there 😅", "chill a bit bro", "not that serious", "watch it 👀"],
-        "serious": ["yeah that crossed the line", "nah we don’t do that here", "alright that’s enough", "you’re pushing it now"],
-        "jail": ["yeah… you earned that one", "straight to jail 💀", "nah take a break", "you did that to yourself fr"]
+        "warn": ["easy there 😅", "chill a bit", "not that serious", "watch it 👀"],
+        "serious": ["that crossed the line", "not cool", "you’re pushing it"],
+        "jail": ["yeah… take a break", "straight to jail 💀", "you earned that"]
     }[level])
+
+# ================= EMBEDS =================
+def get_welcome_embed():
+    return discord.Embed(
+        title="👋 Welcome to Plan B",
+        description=(
+            "**This isn’t just another server.**\n\n"
+            "Plan B is built around **fairness, not control.**\n"
+            "No power-tripping mods. No random punishments.\n\n"
+            "🧠 AI moderation runs quietly in the background\n"
+            "⚖️ Human moderators handle edge cases\n\n"
+            "Just be yourself — and don’t ruin the space for others."
+        ),
+        color=0x5865F2
+    )
+
+def get_rules_embed():
+    return discord.Embed(
+        title="📜 Plan B Rules",
+        description=(
+            "**Simple. Fair. Consistent.**\n\n"
+            "1. Respect the space\n"
+            "2. No hate or harmful intent\n"
+            "3. No spam or disruption\n"
+            "4. No privacy violations\n"
+            "5. Follow Discord ToS\n\n"
+            "**The system reacts to patterns — not single messages.**"
+        ),
+        color=0xED4245
+    )
+
+def get_system_embed():
+    return discord.Embed(
+        title="🤖 How Moderation Works",
+        description=(
+            "Plan B uses **AI-assisted moderation**.\n\n"
+            "• Context-aware\n"
+            "• Pattern-based\n"
+            "• Less bias\n\n"
+            "Warnings → Jail (if behavior continues)\n\n"
+            "Humans still exist for final decisions."
+        ),
+        color=0x57F287
+    )
 
 # ================= HELPERS =================
 def normalize_text(text):
@@ -72,12 +116,6 @@ async def log_action(guild,title,desc):
         embed.timestamp = discord.utils.utcnow()
         await ch.send(embed=embed)
 
-# ================= FILTER =================
-BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
-NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
-
-TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
-
 # ================= AI =================
 async def analyze(text):
     try:
@@ -87,11 +125,14 @@ async def analyze(text):
                 {
                     "role":"system",
                     "content":(
-                        "You are an advanced moderation AI.\n"
-                        "SAFE = normal\n"
-                        "MEDIUM = harassment\n"
-                        "HIGH = threats or hate\n"
-                        "Return only SAFE, MEDIUM, HIGH"
+                        "You are a smart moderation AI.\n"
+                        "Understand context and intent.\n\n"
+                        "SAFE = normal or joking\n"
+                        "MEDIUM = harassment/insults\n"
+                        "HIGH = threats, hate, telling someone to die\n\n"
+                        "Targeting groups = HIGH\n"
+                        "Repeated toxicity increases severity\n\n"
+                        "Respond ONLY: SAFE, MEDIUM, HIGH"
                     )
                 },
                 {"role":"user","content":text}
@@ -128,16 +169,14 @@ async def send_hourly_fact():
         try:
             for guild in client.guilds:
                 channel = discord.utils.get(guild.text_channels, name=GENERAL_CHANNEL_NAME)
-
                 if channel:
                     res = await client_ai.chat.completions.create(
                         model="gpt-4.1-mini",
                         messages=[{"role":"system","content":"Give one short interesting fact."}]
                     )
                     await channel.send(f"🧠 {res.choices[0].message.content.strip()}")
-
-        except Exception as e:
-            print("Fact error:", e)
+        except:
+            pass
 
         await asyncio.sleep(3600)
 
@@ -154,27 +193,31 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # 👀 BOT PRESENCE
+    # 👀 PRESENCE
     if client.user in message.mentions:
-        await message.channel.send("yeah i’m watching 👀", delete_after=5)
+        await message.channel.send("I’m active and watching 👀", delete_after=5)
         return
 
-    uid = str(message.author.id)
     content = message.content.lower()
+    uid = str(message.author.id)
     normalized = normalize_text(content)
     now = time.time()
+
+    # ===== SETUP COMMAND =====
+    if content == PREFIX + "setup":
+        if message.author.guild_permissions.administrator:
+            await message.channel.send(embed=get_welcome_embed())
+            await message.channel.send(embed=get_rules_embed())
+            await message.channel.send(embed=get_system_embed())
+        return
 
     # ===== RELEASE =====
     if content.startswith(PREFIX + "release"):
         if message.author.guild_permissions.administrator and message.mentions:
             user = message.mentions[0]
             role = discord.utils.get(message.guild.roles, name="Jailed")
-
             if role:
                 await user.remove_roles(role)
-
-            user_medium_strikes.pop(str(user.id), None)
-            user_high_strikes.pop(str(user.id), None)
 
             await log_action(message.guild, "🔓 Released", f"{user.mention}")
             await message.channel.send(f"{user.mention} released", delete_after=5)
@@ -188,17 +231,14 @@ async def on_message(message):
     if content.startswith(PREFIX + "chat"):
 
         if message.channel.name != AI_CHANNEL_NAME:
-            await message.channel.send(
-                "AI chat is disabled here, head over to #ai-chat 🤖",
-                delete_after=5
-            )
+            await message.channel.send("Go to #ai-chat 🤖", delete_after=5)
             return
 
         role = discord.utils.get(message.guild.roles, name="AI Access")
 
         if role not in message.author.roles:
             await message.channel.send(
-                "you don’t have access to AI chat, dm @ap.snake for the role 🔐",
+                "You don’t have access. DM @ap.snake for role 🔐",
                 delete_after=5
             )
             return
@@ -231,7 +271,6 @@ async def on_message(message):
     if len(user_message_times[uid]) >= 7:
         await message.author.timeout(datetime.timedelta(minutes=10))
         await cleanup_spam(message.channel, message.author, content)
-        await message.channel.send("bro relax 💀", delete_after=5)
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
