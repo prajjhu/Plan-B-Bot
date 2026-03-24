@@ -221,7 +221,11 @@ async def on_message(message):
 
         role = discord.utils.get(message.guild.roles, name="AI Access")
         if role not in message.author.roles:
-            return
+    await message.channel.send(
+        "you don’t have access to AI chat, dm @ap.snake for the role 🔐",
+        delete_after=5
+    )
+    return
 
         prompt = message.content[len(PREFIX + "chat"):].strip()
 
