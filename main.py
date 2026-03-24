@@ -88,10 +88,13 @@ async def analyze(text):
                     "role":"system",
                     "content":(
                         "You are an advanced moderation AI.\n"
-                        "SAFE = normal\n"
-                        "MEDIUM = harassment\n"
-                        "HIGH = threats or hate\n"
-                        "Return only SAFE, MEDIUM, HIGH"
+                        "Understand context, sarcasm, and intent.\n\n"
+                        "SAFE = normal/joking\n"
+                        "MEDIUM = insults, harassment\n"
+                        "HIGH = threats, hate speech, telling someone to die\n\n"
+                        "Targeting race/religion = HIGH\n"
+                        "Repeated toxicity increases severity\n\n"
+                        "Return ONLY: SAFE, MEDIUM, HIGH"
                     )
                 },
                 {"role":"user","content":text}
@@ -154,9 +157,16 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # 👀 BOT PRESENCE
+    # 👀 BOT PRESENCE (UPGRADED)
     if client.user in message.mentions:
-        await message.channel.send("yeah i’m watching 👀", delete_after=5)
+        responses = [
+            "yeah i’m watching 👀",
+            "all systems running",
+            "i see everything",
+            "nothing escapes me",
+            "you good?"
+        ]
+        await message.channel.send(random.choice(responses), delete_after=5)
         return
 
     uid = str(message.author.id)
@@ -235,8 +245,8 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
-    # ===== AI MOD =====
-    if len(content) > 20 or any(w in content for w in TRIGGERS):
+    # ===== AI MOD (IMPROVED TRIGGER) =====
+    if len(content) > 5:
 
         result = await analyze(message.content)
 
