@@ -169,14 +169,13 @@ async def jail_user(member, guild, reason):
         if jail_channel:
             break
 
-    # ✅ NEW: send temp message
+    # ✅ UPDATED: send temp message (non-blocking)
     if jail_channel:
         try:
-            msg = await jail_channel.send(
-                f"🚨 {member.mention} was jailed\nReason: {reason}"
+            await jail_channel.send(
+                f"🚨 {member.mention} was jailed\nReason: {reason}",
+                delete_after=60
             )
-            await asyncio.sleep(60)
-            await msg.delete()
         except:
             pass
 
