@@ -41,6 +41,10 @@ user_jail_lock = {}
 
 user_context = {}
 
+# ✅ NEW
+user_last_seen = {}
+recent_toxic_users = {}
+
 # ================= PERSONALITY =================
 def bot_reply(level):
     return random.choice({
@@ -48,6 +52,13 @@ def bot_reply(level):
         "serious": ["yeah that crossed the line", "nah we don’t do that here", "alright that’s enough", "you’re pushing it now"],
         "jail": ["yeah… you earned that one", "straight to jail 💀", "nah take a break", "you did that to yourself fr"]
     }[level])
+
+# ✅ NEW
+def warn_user(member, level):
+    if level == "medium":
+        return f"⚠️ {member.mention} chill a bit"
+    if level == "high":
+        return f"🚨 {member.mention} that’s too far"
 
 # ================= HELPERS =================
 def normalize_text(text):
@@ -81,14 +92,14 @@ async def log_action(guild,title,desc):
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
-TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid"]
+# ✅ UPDATED
+TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid","kys","trash","worthless"]
 
 # ================= AI =================
 async def analyze(uid, text, use_context=True):
     try:
         context_text = ""
 
-        # 🧠 ONLY USE CONTEXT WHEN NEEDED
         if use_context:
             history = user_context.get(uid, [])
             context_text = "\n".join(history[:-1])
@@ -183,7 +194,6 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # 👀 BOT PRESENCE
     if client.user in message.mentions:
         await message.channel.send(random.choice([
             "yeah i’m watching 👀",
@@ -198,6 +208,13 @@ async def on_message(message):
     content = message.content.lower()
     normalized = normalize_text(content)
     now = time.time()
+
+    # ✅ DECAY SYSTEM
+    last = user_last_seen.get(uid, now)
+    if now - last > 10:
+        user_medium_strikes[uid] = max(0, user_medium_strikes.get(uid, 0) - 1)
+        user_high_strikes[uid] = max(0, user_high_strikes.get(uid, 0) - 1)
+    user_last_seen[uid] = now
 
     # 🧠 STORE CONTEXT
     user_context.setdefault(uid, []).append(message.content)
@@ -220,7 +237,6 @@ async def on_message(message):
             await message.channel.send(f"{user.mention} released", delete_after=5)
         return
 
-    # ===== JAIL CHANNEL =====
     if message.channel.name in JAIL_CHANNELS:
         return
 
@@ -272,32 +288,61 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
-    # ===== AI MOD (SMART + LESS AGGRESSIVE) =====
+    # ===== AI MOD =====
     if len(content) > 5:
 
-        use_context = any(w in content for w in TRIGGERS)
+        use_context = any(w in content for w in TRIGGERS) or len(user_context[uid]) >= 2
 
         result = await analyze(uid, message.content, use_context)
 
+        # ✅ MUTUAL DETECTION
+        channel_id = str(message.channel.id)
+        recent_toxic_users.setdefault(channel_id, [])
+        recent_toxic_users[channel_id].append(uid)
+        if len(recent_toxic_users[channel_id]) > 6:
+            recent_toxic_users[channel_id].pop(0)
+
+        unique_users = set(recent_toxic_users[channel_id])
+        is_mutual = len(unique_users) >= 2
+
+        # ===== MEDIUM =====
         if result == "MEDIUM":
+
+            if is_mutual:
+                return
+
             s = user_medium_strikes.get(uid, 0) + 1
             user_medium_strikes[uid] = s
 
-            if s >= 5:
+            if s <= 2:
+                await message.channel.send(warn_user(message.author, "medium"), delete_after=5)
+            else:
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Harassment")
                 user_medium_strikes[uid] = 0
+
             return
 
-        if result == "HIGH" and any(w in content for w in TRIGGERS):
+        # ===== HIGH =====
+        if result == "HIGH":
+
+            if is_mutual:
+                s = user_high_strikes.get(uid, 0) + 1
+                user_high_strikes[uid] = s
+                if s < 3:
+                    return
+
             s = user_high_strikes.get(uid, 0) + 1
             user_high_strikes[uid] = s
 
-            if s >= 2:
+            if s == 1:
+                await message.channel.send(warn_user(message.author, "high"), delete_after=5)
+            else:
                 await cleanup_spam(message.channel, message.author, content)
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Severe behavior")
                 user_high_strikes[uid] = 0
+
             return
 
     # ===== SIMILAR SPAM =====
