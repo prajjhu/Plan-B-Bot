@@ -10,10 +10,16 @@ from openai import AsyncOpenAI
 
 # ================= CONFIG =================
 PREFIX = "="
+
 JAIL_CHANNELS = ["jail-1", "jail-2"]
 AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "chat"
+
+# 👇 PREMIUM CHANNEL NAMES
+WELCOME_CHANNEL = "👋│welcome"
+RULES_CHANNEL = "📜│rules"
+SYSTEM_CHANNEL = "🤖│how-plan-b-works"
 
 SIMILARITY_THRESHOLD = 0.85
 # ==========================================
@@ -36,6 +42,12 @@ user_high_strikes = {}
 
 user_jail_lock = {}
 
+# ================= FILTER =================
+BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
+NORMALIZED_BANNED = []
+
+TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
+
 # ================= PERSONALITY =================
 def bot_reply(level):
     return random.choice({
@@ -54,7 +66,7 @@ def get_welcome_embed():
             "No power-tripping mods. No random punishments.\n\n"
             "🧠 AI moderation runs quietly in the background\n"
             "⚖️ Human moderators handle edge cases\n\n"
-            "Just be yourself — and don’t ruin the space for others."
+            "**Be yourself — just don’t ruin the space.**"
         ),
         color=0x5865F2
     )
@@ -64,12 +76,12 @@ def get_rules_embed():
         title="📜 Plan B Rules",
         description=(
             "**Simple. Fair. Consistent.**\n\n"
-            "1. Respect the space\n"
+            "1. Respect others\n"
             "2. No hate or harmful intent\n"
             "3. No spam or disruption\n"
             "4. No privacy violations\n"
             "5. Follow Discord ToS\n\n"
-            "**The system reacts to patterns — not single messages.**"
+            "**Patterns matter more than single messages.**"
         ),
         color=0xED4245
     )
@@ -79,11 +91,11 @@ def get_system_embed():
         title="🤖 How Moderation Works",
         description=(
             "Plan B uses **AI-assisted moderation**.\n\n"
-            "• Context-aware\n"
-            "• Pattern-based\n"
-            "• Less bias\n\n"
-            "Warnings → Jail (if behavior continues)\n\n"
-            "Humans still exist for final decisions."
+            "• Understands context\n"
+            "• Tracks behavior patterns\n"
+            "• Avoids overreaction\n\n"
+            "Warning → Escalation → Jail\n\n"
+            "⚖️ Humans step in when needed"
         ),
         color=0x57F287
     )
@@ -97,6 +109,9 @@ def normalize_text(text):
     text = re.sub(r'[\W_]+','',text)
     text = re.sub(r'(.)\1+',r'\1',text)
     return text
+
+# build normalized banned list
+NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 def is_similar(a,b):
     return SequenceMatcher(None,a,b).ratio() >= SIMILARITY_THRESHOLD
@@ -125,14 +140,11 @@ async def analyze(text):
                 {
                     "role":"system",
                     "content":(
-                        "You are a smart moderation AI.\n"
-                        "Understand context and intent.\n\n"
-                        "SAFE = normal or joking\n"
-                        "MEDIUM = harassment/insults\n"
-                        "HIGH = threats, hate, telling someone to die\n\n"
-                        "Targeting groups = HIGH\n"
-                        "Repeated toxicity increases severity\n\n"
-                        "Respond ONLY: SAFE, MEDIUM, HIGH"
+                        "Understand context and intent.\n"
+                        "SAFE = normal/joking\n"
+                        "MEDIUM = harassment\n"
+                        "HIGH = threats/hate\n"
+                        "Return ONLY SAFE, MEDIUM, HIGH"
                     )
                 },
                 {"role":"user","content":text}
@@ -203,12 +215,28 @@ async def on_message(message):
     normalized = normalize_text(content)
     now = time.time()
 
-    # ===== SETUP COMMAND =====
+    # ===== SETUP (PREMIUM) =====
     if content == PREFIX + "setup":
-        if message.author.guild_permissions.administrator:
-            await message.channel.send(embed=get_welcome_embed())
-            await message.channel.send(embed=get_rules_embed())
-            await message.channel.send(embed=get_system_embed())
+
+        if not message.author.guild_permissions.administrator:
+            return
+
+        guild = message.guild
+
+        welcome_ch = discord.utils.get(guild.text_channels, name=WELCOME_CHANNEL)
+        rules_ch = discord.utils.get(guild.text_channels, name=RULES_CHANNEL)
+        system_ch = discord.utils.get(guild.text_channels, name=SYSTEM_CHANNEL)
+
+        if welcome_ch:
+            await welcome_ch.send(embed=get_welcome_embed())
+
+        if rules_ch:
+            await rules_ch.send(embed=get_rules_embed())
+
+        if system_ch:
+            await system_ch.send(embed=get_system_embed())
+
+        await message.channel.send("✅ Setup complete", delete_after=5)
         return
 
     # ===== RELEASE =====
@@ -216,6 +244,7 @@ async def on_message(message):
         if message.author.guild_permissions.administrator and message.mentions:
             user = message.mentions[0]
             role = discord.utils.get(message.guild.roles, name="Jailed")
+
             if role:
                 await user.remove_roles(role)
 
@@ -238,7 +267,7 @@ async def on_message(message):
 
         if role not in message.author.roles:
             await message.channel.send(
-                "You don’t have access. DM @ap.snake for role 🔐",
+                "You don’t have access. DM @ap.snake 🔐",
                 delete_after=5
             )
             return
