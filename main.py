@@ -16,6 +16,9 @@ LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "chat"
 
 SIMILARITY_THRESHOLD = 0.85
+
+# 🧠 NEW: how many past messages to remember
+CONTEXT_LIMIT = 5
 # ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -35,6 +38,9 @@ user_medium_strikes = {}
 user_high_strikes = {}
 
 user_jail_lock = {}
+
+# 🧠 NEW: conversational memory
+user_context = {}
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -79,8 +85,20 @@ NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
 
 # ================= AI =================
-async def analyze(text):
+async def analyze(uid, text):
     try:
+        # 🧠 BUILD CONTEXT
+        history = user_context.get(uid, [])
+        context_text = "\n".join(history[:-1])  # previous messages only
+
+        prompt = f"""
+Previous messages from user:
+{context_text}
+
+Current message:
+{text}
+"""
+
         res = await client_ai.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
@@ -88,16 +106,16 @@ async def analyze(text):
                     "role":"system",
                     "content":(
                         "You are an advanced moderation AI.\n"
-                        "Understand context, sarcasm, and intent.\n\n"
+                        "Understand context, intent, escalation, and repeated behavior.\n\n"
                         "SAFE = normal/joking\n"
                         "MEDIUM = insults, harassment\n"
                         "HIGH = threats, hate speech, telling someone to die\n\n"
-                        "Targeting race/religion = HIGH\n"
-                        "Repeated toxicity increases severity\n\n"
+                        "Repeated toxicity increases severity.\n"
+                        "Targeting groups = HIGH.\n\n"
                         "Return ONLY: SAFE, MEDIUM, HIGH"
                     )
                 },
-                {"role":"user","content":text}
+                {"role":"user","content":prompt}
             ]
         )
         return res.choices[0].message.content.strip()
@@ -157,7 +175,7 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # 👀 BOT PRESENCE (UPGRADED)
+    # 👀 BOT PRESENCE
     if client.user in message.mentions:
         responses = [
             "yeah i’m watching 👀",
@@ -173,6 +191,11 @@ async def on_message(message):
     content = message.content.lower()
     normalized = normalize_text(content)
     now = time.time()
+
+    # 🧠 STORE CONTEXT
+    user_context.setdefault(uid, []).append(message.content)
+    if len(user_context[uid]) > CONTEXT_LIMIT:
+        user_context[uid].pop(0)
 
     # ===== RELEASE =====
     if content.startswith(PREFIX + "release"):
@@ -245,10 +268,10 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
-    # ===== AI MOD (IMPROVED TRIGGER) =====
+    # ===== AI MOD (NOW CONTEXT-AWARE) =====
     if len(content) > 5:
 
-        result = await analyze(message.content)
+        result = await analyze(uid, message.content)
 
         if result == "MEDIUM":
             s = user_medium_strikes.get(uid, 0) + 1
