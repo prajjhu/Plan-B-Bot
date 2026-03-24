@@ -3,12 +3,15 @@ import os
 import random
 import time
 import asyncio
+from openai import AsyncOpenAI
 
 # ================= CONFIG =================
 PREFIX = "="
 JAIL_CHANNELS = ["jail-1", "jail-2"]
 WARNING_TIMEOUT = 60
 # ==========================================
+
+client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -18,6 +21,34 @@ client = discord.Client(intents=intents)
 
 user_warnings = {}
 user_last_message_time = {}
+
+# ------------------ AI ANALYSIS ------------------
+async def analyze_message(message_content):
+    try:
+        response = await client_ai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a VERY lenient moderation AI.\n\n"
+                        "SAFE = jokes, sarcasm, casual insults\n"
+                        "LOW = mild negativity but not harmful\n"
+                        "MEDIUM = clear targeted harassment\n"
+                        "HIGH = threats, hate speech, or harmful intent\n\n"
+                        "Do NOT overreact.\n"
+                        "Respond ONLY with: SAFE, LOW, MEDIUM, or HIGH"
+                    )
+                },
+                {"role": "user", "content": message_content}
+            ]
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print(f"AI error: {e}")
+        return "SAFE"
 
 # ------------------ JAIL FUNCTION ------------------
 async def jail_user(member, guild, channel):
@@ -63,11 +94,9 @@ async def on_message(message):
 
     # ------------------ TIME DECAY ------------------
     current_time = time.time()
-
     if user_id in user_last_message_time:
         if current_time - user_last_message_time[user_id] > WARNING_TIMEOUT:
             user_warnings[user_id] = 0
-
     user_last_message_time[user_id] = current_time
 
     # ------------------ BOT MENTION ------------------
@@ -80,7 +109,6 @@ async def on_message(message):
     # ==================================================
     if is_jail_channel:
 
-        # RELEASE COMMAND (ONLY HERE)
         if message.content.startswith(PREFIX + "release"):
             if message.author.guild_permissions.administrator:
                 if message.mentions:
@@ -90,20 +118,17 @@ async def on_message(message):
                     try:
                         if role:
                             await user.remove_roles(role)
-
-                            # delete admin command
                             await message.delete(delay=5)
-
                             await message.channel.send(
                                 f"{user.mention} has been released.",
                                 delete_after=5
                             )
                     except Exception as e:
                         print(f"Release error: {e}")
-            return  # 🔥 IMPORTANT
+            return
 
-        # ONLY spam/wall detection
-        if len(message.content) > 200 or message.content.count("\n") > 5:
+        # Only stop extreme spam
+        if len(message.content) > 400 or message.content.count("\n") > 5:
             try:
                 await message.delete()
                 await message.channel.send(
@@ -113,53 +138,73 @@ async def on_message(message):
             except Exception as e:
                 print(f"Jail moderation error: {e}")
 
-        return  # 🔥 FULL STOP (no other moderation)
-
-    # ==================================================
-    # 🌍 NORMAL CHANNELS
-    # ==================================================
-
-    # TEST COMMAND
-    if message.content.startswith(PREFIX + "testjail"):
-        if message.author.guild_permissions.administrator:
-            await jail_user(message.author, message.guild, message.channel)
-            await message.channel.send(
-                "Test: You have been jailed.",
-                delete_after=5
-            )
         return
 
-    # ------------------ TEST LOGIC ------------------
-    if "spamtest" in content:
-        result = "MEDIUM"
-    elif "serious" in content:
-        result = "HIGH"
-    elif "annoying" in content:
-        result = "LOW"
+    # ==================================================
+    # 🤖 AI CHAT SYSTEM
+    # ==================================================
+    if message.content.startswith(PREFIX + "chat"):
+
+        allowed_role = discord.utils.get(message.guild.roles, name="AI Access")
+        if allowed_role not in message.author.roles:
+            return
+
+        user_input = message.content[len(PREFIX + "chat"):].strip()
+
+        if not user_input:
+            await message.channel.send("Say something after =chat", delete_after=5)
+            return
+
+        try:
+            response = await client_ai.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful, friendly assistant."},
+                    {"role": "user", "content": user_input}
+                ]
+            )
+
+            reply = response.choices[0].message.content
+            await message.channel.send(reply[:2000])
+
+        except Exception as e:
+            print(e)
+            await message.channel.send("Something went wrong.", delete_after=5)
+
+        return
+
+    # ==================================================
+    # 🌍 NORMAL MODERATION (LENIENT AI TRIGGER)
+    # ==================================================
+
+    suspicious_keywords = [
+        "kill", "die", "kys", "worthless",
+        "nobody likes you", "go kill yourself",
+        "rape", "threat"
+    ]
+
+    if any(word in content for word in suspicious_keywords):
+        result = await analyze_message(message.content)
     else:
         result = "SAFE"
 
     # ------------------ RESPONSES ------------------
     guardian_responses = [
-        "Alright, let’s keep it respectful 👍",
-        "Let’s not take it too far.",
-        "Hey, ease it down a bit.",
-        "Keep it chill 🙂",
-        "No need to push it further."
+        "Let’s keep it chill 🙂",
+        "No need to take it that far.",
+        "Keep things respectful 👍"
     ]
 
     enforcer_responses = [
-        "This is getting disruptive, let’s stop here.",
-        "You’re crossing the line now.",
-        "Please tone it down.",
+        "This is getting a bit much, let’s stop here.",
+        "You’re pushing it now.",
         "Let’s not continue like this."
     ]
 
     sentinel_responses = [
-        "This violates critical rules.",
-        "This kind of content is not allowed.",
-        "Moderation has been triggered for this.",
-        "This is a serious violation."
+        "This crosses the line.",
+        "This kind of content isn’t allowed.",
+        "Moderation has stepped in."
     ]
 
     # ------------------ LEVEL SYSTEM ------------------
@@ -169,27 +214,18 @@ async def on_message(message):
 
         if user_warnings[user_id] >= 3:
             await asyncio.sleep(1.5)
-            await message.channel.send(
-                random.choice(guardian_responses),
-                delete_after=5
-            )
+            await message.channel.send(random.choice(guardian_responses), delete_after=5)
             user_warnings[user_id] = 0
 
     elif result == "MEDIUM":
         await asyncio.sleep(1.5)
-        await message.channel.send(
-            random.choice(enforcer_responses),
-            delete_after=5
-        )
+        await message.channel.send(random.choice(enforcer_responses), delete_after=5)
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
 
     elif result == "HIGH":
         await asyncio.sleep(1.5)
-        await message.channel.send(
-            random.choice(sentinel_responses),
-            delete_after=5
-        )
+        await message.channel.send(random.choice(sentinel_responses), delete_after=5)
         await cleanup_messages(message.channel, message.author)
         await jail_user(message.author, message.guild, message.channel)
 
