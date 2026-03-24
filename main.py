@@ -142,6 +142,7 @@ Current message:
         return "SAFE"
 
 # ================= JAIL =================
+# ================= JAIL =================
 async def jail_user(member, guild, reason):
     uid = str(member.id)
     now = time.time()
@@ -158,7 +159,26 @@ async def jail_user(member, guild, reason):
         except:
             pass
 
+    # existing log (UNCHANGED)
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
+
+    # ✅ NEW: find jail channel from config
+    jail_channel = None
+    for ch_name in JAIL_CHANNELS:
+        jail_channel = discord.utils.get(guild.text_channels, name=ch_name)
+        if jail_channel:
+            break
+
+    # ✅ NEW: send temp message
+    if jail_channel:
+        try:
+            msg = await jail_channel.send(
+                f"🚨 {member.mention} was jailed\nReason: {reason}"
+            )
+            await asyncio.sleep(60)
+            await msg.delete()
+        except:
+            pass
 
 # ================= FACT LOOP =================
 async def send_hourly_fact():
