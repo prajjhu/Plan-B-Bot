@@ -31,6 +31,14 @@ user_repeat_count = {}
 user_message_times = {}
 user_recent_messages = {}
 
+# ------------------ RESET FUNCTION (🔥 FIX) ------------------
+def reset_user_state(user_id):
+    user_warnings.pop(user_id, None)
+    user_last_content.pop(user_id, None)
+    user_repeat_count.pop(user_id, None)
+    user_message_times.pop(user_id, None)
+    user_recent_messages.pop(user_id, None)
+
 # ------------------ SENTINEL ------------------
 INSTANT_JAIL_WORDS = [
     "nigger", "faggot", "rape", "pedophile",
@@ -114,6 +122,9 @@ async def jail_user(member, guild, channel):
     role = discord.utils.get(guild.roles, name="Jailed")
     mod_role = discord.utils.get(guild.roles, name="Moderator")
 
+    # 🔥 RESET MEMORY HERE
+    reset_user_state(str(member.id))
+
     if role:
         try:
             await member.add_roles(role)
@@ -177,6 +188,10 @@ async def on_message(message):
 
                 if role:
                     await user.remove_roles(role)
+
+                    # 🔥 RESET ON RELEASE
+                    reset_user_state(str(user.id))
+
                     await message.delete(delay=5)
                     await message.channel.send(
                         f"{user.mention} released.",
@@ -189,7 +204,7 @@ async def on_message(message):
         return
 
     # ==================================================
-    # 🤖 AI CHAT (UPGRADED 🔥)
+    # 🤖 AI CHAT
     # ==================================================
     if content.startswith(PREFIX + "chat"):
 
@@ -212,8 +227,7 @@ async def on_message(message):
                         "Be casual, slightly witty, and natural.\n"
                         "Use light slang when appropriate (like 'ngl', 'fr', 'lowkey') but don't overdo it.\n"
                         "Keep responses engaging and easy to read.\n"
-                        "Avoid being overly formal or too long.\n\n"
-                        "You are friendly, confident, and human-like."
+                        "Avoid being overly formal or too long."
                     )
                 },
                 {"role": "user", "content": prompt}
@@ -222,7 +236,6 @@ async def on_message(message):
 
         reply = res.choices[0].message.content
 
-        # slight randomness feel
         if random.random() < 0.2:
             reply += random.choice([" 😄", " 👀", " ngl", " fr"])
 
