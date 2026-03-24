@@ -39,24 +39,9 @@ user_jail_lock = {}
 # ================= PERSONALITY =================
 def bot_reply(level):
     return random.choice({
-        "warn": [
-            "easy there 😅",
-            "chill a bit bro",
-            "not that serious",
-            "watch it 👀"
-        ],
-        "serious": [
-            "yeah that crossed the line",
-            "nah we don’t do that here",
-            "alright that’s enough",
-            "you’re pushing it now"
-        ],
-        "jail": [
-            "yeah… you earned that one",
-            "straight to jail 💀",
-            "nah take a break",
-            "you did that to yourself fr"
-        ]
+        "warn": ["easy there 😅", "chill a bit bro", "not that serious", "watch it 👀"],
+        "serious": ["yeah that crossed the line", "nah we don’t do that here", "alright that’s enough", "you’re pushing it now"],
+        "jail": ["yeah… you earned that one", "straight to jail 💀", "nah take a break", "you did that to yourself fr"]
     }[level])
 
 # ================= HELPERS =================
@@ -93,7 +78,7 @@ NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 TRIGGERS = ["idiot","retard","fuck you","bitch","nigga","kill","die","hate","stupid"]
 
-# ================= AI MODERATION =================
+# ================= AI =================
 async def analyze(text):
     try:
         res = await client_ai.chat.completions.create(
@@ -103,13 +88,10 @@ async def analyze(text):
                     "role":"system",
                     "content":(
                         "You are an advanced moderation AI.\n"
-                        "Understand context, sarcasm, and intent.\n\n"
-                        "SAFE = normal/joking\n"
-                        "MEDIUM = insults/harassment\n"
-                        "HIGH = threats, hate speech, telling someone to die, targeting groups\n\n"
-                        "If repeated toxicity → escalate.\n"
-                        "If targeting race/religion → HIGH.\n\n"
-                        "Respond ONLY: SAFE, MEDIUM, HIGH"
+                        "SAFE = normal\n"
+                        "MEDIUM = harassment\n"
+                        "HIGH = threats or hate\n"
+                        "Return only SAFE, MEDIUM, HIGH"
                     )
                 },
                 {"role":"user","content":text}
@@ -138,7 +120,7 @@ async def jail_user(member, guild, reason):
 
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
 
-# ================= HOURLY FACT =================
+# ================= FACT LOOP =================
 async def send_hourly_fact():
     await client.wait_until_ready()
 
@@ -150,16 +132,9 @@ async def send_hourly_fact():
                 if channel:
                     res = await client_ai.chat.completions.create(
                         model="gpt-4.1-mini",
-                        messages=[
-                            {
-                                "role":"system",
-                                "content":"Give one short interesting fact."
-                            }
-                        ]
+                        messages=[{"role":"system","content":"Give one short interesting fact."}]
                     )
-
-                    fact = res.choices[0].message.content.strip()
-                    await channel.send(f"🧠 {fact}")
+                    await channel.send(f"🧠 {res.choices[0].message.content.strip()}")
 
         except Exception as e:
             print("Fact error:", e)
@@ -179,7 +154,7 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # 🤖 BOT MENTION
+    # 👀 BOT PRESENCE
     if client.user in message.mentions:
         await message.channel.send("yeah i’m watching 👀", delete_after=5)
         return
@@ -220,13 +195,13 @@ async def on_message(message):
             return
 
         role = discord.utils.get(message.guild.roles, name="AI Access")
-        
+
         if role not in message.author.roles:
-    await message.channel.send(
-        "you don’t have access to AI chat, dm @ap.snake for the role 🔐",
-        delete_after=5
-    )
-    return
+            await message.channel.send(
+                "you don’t have access to AI chat, dm @ap.snake for the role 🔐",
+                delete_after=5
+            )
+            return
 
         prompt = message.content[len(PREFIX + "chat"):].strip()
 
@@ -241,7 +216,7 @@ async def on_message(message):
         await message.channel.send(res.choices[0].message.content[:2000])
         return
 
-    # ===== HARD SLUR =====
+    # ===== HARD FILTER =====
     if any(b in normalized for b in NORMALIZED_BANNED):
         await message.delete()
         await cleanup_spam(message.channel, message.author, content)
@@ -260,12 +235,11 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Raid spam")
         return
 
-    # ===== AI MODERATION (ALWAYS RUNS FOR LONG / TOXIC TEXT) =====
+    # ===== AI MOD =====
     if len(content) > 20 or any(w in content for w in TRIGGERS):
 
         result = await analyze(message.content)
 
-        # 🟡 MEDIUM
         if result == "MEDIUM":
             s = user_medium_strikes.get(uid, 0) + 1
             user_medium_strikes[uid] = s
@@ -278,7 +252,6 @@ async def on_message(message):
                 user_medium_strikes[uid] = 0
             return
 
-        # 🔴 HIGH
         if result == "HIGH":
             s = user_high_strikes.get(uid, 0) + 1
             user_high_strikes[uid] = s
