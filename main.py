@@ -329,13 +329,20 @@ async def on_message(message):
         if result == "MEDIUM":
 
             if is_mutual:
+                await message.channel.send(
+                    f"⚠️ {message.author.mention} keep it chill (mutual)",
+                    delete_after=5
+                )
                 return
 
             s = user_medium_strikes.get(uid, 0) + 1
             user_medium_strikes[uid] = s
 
             if s <= 2:
-                await message.channel.send(warn_user(message.author, "medium"), delete_after=5)
+                await message.channel.send(
+                    warn_user(message.author, "medium"),
+                    delete_after=5
+                )
             else:
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Harassment")
@@ -343,12 +350,19 @@ async def on_message(message):
 
             return
 
+
         # ===== HIGH =====
         if result == "HIGH":
 
             if is_mutual:
+                await message.channel.send(
+                    f"🚨 {message.author.mention} chill, don’t escalate",
+                    delete_after=5
+                )
+
                 s = user_high_strikes.get(uid, 0) + 1
                 user_high_strikes[uid] = s
+
                 if s < 3:
                     return
 
@@ -356,7 +370,10 @@ async def on_message(message):
             user_high_strikes[uid] = s
 
             if s == 1:
-                await message.channel.send(warn_user(message.author, "high"), delete_after=5)
+                await message.channel.send(
+                    warn_user(message.author, "high"),
+                    delete_after=5
+                )
             else:
                 await cleanup_spam(message.channel, message.author, content)
                 await message.channel.send(bot_reply("jail"), delete_after=5)
@@ -364,7 +381,7 @@ async def on_message(message):
                 user_high_strikes[uid] = 0
 
             return
-
+    
     # ===== SIMILAR SPAM =====
     last = user_last_content.get(uid)
 
