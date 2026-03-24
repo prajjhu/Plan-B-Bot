@@ -106,10 +106,7 @@ async def jail_user(member, guild, channel):
             pass
 
     if mod_role:
-        await channel.send(
-            f"{mod_role.mention} {member.mention} jailed.",
-            delete_after=10
-        )
+        await channel.send(f"{mod_role.mention} {member.mention} jailed.", delete_after=10)
 
 # ------------------ CLEANUP ------------------
 async def cleanup_messages(channel, user):
@@ -138,7 +135,6 @@ async def on_message(message):
     now = time.time()
     is_jail = message.channel.name in JAIL_CHANNELS
 
-    # ------------------ COOLDOWN ------------------
     in_cooldown = user_id in user_cooldowns and now < user_cooldowns[user_id]
 
     # ------------------ MENTION ------------------
@@ -147,59 +143,40 @@ async def on_message(message):
         return
 
     # ==================================================
-# 🔓 GLOBAL RELEASE COMMAND (WORKS EVERYWHERE)
-# ==================================================
-if content.startswith(PREFIX + "release"):
+    # 🔓 GLOBAL RELEASE COMMAND (FIXED)
+    # ==================================================
+    if content.startswith(PREFIX + "release"):
 
-    if not message.author.guild_permissions.administrator:
+        if not message.author.guild_permissions.administrator:
+            return
+
+        if message.mentions:
+            user = message.mentions[0]
+            role = discord.utils.get(message.guild.roles, name="Jailed")
+
+            if role:
+                try:
+                    await user.remove_roles(role)
+
+                    reset_user_state(str(user.id))
+                    user_offense_count[str(user.id)] = 0
+
+                    await message.delete(delay=5)
+
+                    await message.channel.send(
+                        f"{user.mention} has been released.",
+                        delete_after=5
+                    )
+
+                except Exception as e:
+                    print(f"Release error: {e}")
+
         return
-
-    if message.mentions:
-        user = message.mentions[0]
-        role = discord.utils.get(message.guild.roles, name="Jailed")
-
-        if role:
-            try:
-                await user.remove_roles(role)
-
-                # 🔥 RESET USER STATE
-                reset_user_state(str(user.id))
-                user_offense_count[str(user.id)] = 0
-
-                # delete command after 5 sec
-                await message.delete(delay=5)
-
-                await message.channel.send(
-                    f"{user.mention} has been released.",
-                    delete_after=5
-                )
-
-            except Exception as e:
-                print(f"Release error: {e}")
-                return
 
     # ==================================================
     # 🔒 JAIL CHANNEL
     # ==================================================
     if is_jail:
-
-        if content.startswith(PREFIX + "release"):
-            if message.author.guild_permissions.administrator and message.mentions:
-                user = message.mentions[0]
-                role = discord.utils.get(message.guild.roles, name="Jailed")
-
-                if role:
-                    await user.remove_roles(role)
-                    reset_user_state(str(user.id))
-                    user_offense_count[str(user.id)] = 0
-
-                    await message.delete(delay=5)
-                    await message.channel.send(
-                        f"{user.mention} released.",
-                        delete_after=5
-                    )
-            return
-
         if len(content) > 250 or content.count("\n") > 5:
             await message.delete()
         return
@@ -248,7 +225,7 @@ if content.startswith(PREFIX + "release"):
             return
 
     # ==================================================
-    # 🧩 SPAM SYSTEM (FIXED)
+    # 🧩 SPAM SYSTEM
     # ==================================================
     user_last_content.setdefault(user_id, content)
     user_repeat_count[user_id] = user_repeat_count.get(user_id, 0)
@@ -261,7 +238,6 @@ if content.startswith(PREFIX + "release"):
 
     if user_repeat_count[user_id] >= 5:
 
-        # 🔥 FIX: cooldown now IGNORES instead of punishes
         if in_cooldown:
             return
 
