@@ -14,7 +14,7 @@ JAIL_CHANNELS = ["jail-1", "jail-2"]
 AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "chat"
-MODERATOR_ROLE_NAME = "Moderators"
+MODERATOR_ROLE_NAME = "Moderator"
 
 SIMILARITY_THRESHOLD = 0.85
 
