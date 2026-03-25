@@ -89,17 +89,14 @@ async def log_action(guild,title,desc):
         embed.timestamp = discord.utils.utcnow()
         await ch.send(embed=embed)
 
-async def notify_mods_jail(guild, member, reason):
+async def notify_mods_jail(channel, guild, member, reason):
     role = discord.utils.get(guild.roles, name=MODERATOR_ROLE_NAME)
     if not role:
-        return
-
-    ch = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
-    if not ch:
+        print(f"MOD ALERT ERROR: role '{MODERATOR_ROLE_NAME}' not found")
         return
 
     try:
-        await ch.send(
+        await channel.send(
             f"{role.mention} {member.mention} has been jailed, due to: {reason}",
             allowed_mentions=discord.AllowedMentions(roles=True, users=True),
             delete_after=10
@@ -162,7 +159,7 @@ Current message:
 
 # ================= JAIL =================
 # ================= JAIL =================
-async def jail_user(member, guild, reason):
+async def jail_user(member, guild, reason, source_channel=None):
     uid = str(member.id)
     now = time.time()
 
@@ -180,7 +177,9 @@ async def jail_user(member, guild, reason):
 
     # existing log (UNCHANGED)
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
-    await notify_mods_jail(guild, member, reason)
+
+    if source_channel:
+        await notify_mods_jail(source_channel, guild, member, reason)
 
     # ✅ UPDATED: find jail channel (handles emoji names)
     jail_channel = None
@@ -315,7 +314,7 @@ async def on_message(message):
         await message.delete()
         await cleanup_spam(message.channel, message.author, content)
         await message.channel.send(bot_reply("jail"), delete_after=5)
-        await jail_user(message.author, message.guild, "Banned word")
+        await jail_user(message.author, message.guild, "Banned word", message.channel)
         return
 
     # ===== BURST SPAM =====
@@ -326,7 +325,7 @@ async def on_message(message):
         await message.author.timeout(datetime.timedelta(minutes=10))
         await cleanup_spam(message.channel, message.author, content)
         await message.channel.send("bro relax 💀", delete_after=5)
-        await jail_user(message.author, message.guild, "Raid spam")
+        await jail_user(message.author, message.guild, "Raid spam", message.channel)
         return
 
     # ===== AI MOD =====
@@ -366,7 +365,7 @@ async def on_message(message):
                 )
             else:
                 await message.channel.send(bot_reply("jail"), delete_after=5)
-                await jail_user(message.author, message.guild, "Harassment")
+                await jail_user(message.author, message.guild, "Harassment", message.channel)
                 user_medium_strikes[uid] = 0
 
             return
@@ -398,7 +397,7 @@ async def on_message(message):
             else:
                 await cleanup_spam(message.channel, message.author, content)
                 await message.channel.send(bot_reply("jail"), delete_after=5)
-                await jail_user(message.author, message.guild, "Severe behavior")
+                await jail_user(message.author, message.guild, "Severe behavior", message.channel)
                 user_high_strikes[uid] = 0
 
             return
@@ -415,7 +414,7 @@ async def on_message(message):
     if user_repeat_count[uid] >= 5:
         await cleanup_spam(message.channel, message.author, content)
         await message.channel.send(bot_reply("jail"), delete_after=5)
-        await jail_user(message.author, message.guild, "Spam")
+        await jail_user(message.author, message.guild, "Spam", message.channel)
         return
 
 client.run(os.getenv("TOKEN"))
