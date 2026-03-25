@@ -13,8 +13,8 @@ PREFIX = "="
 JAIL_CHANNELS = ["jail-1", "jail-2"]
 AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
-GENERAL_CHANNEL_NAME = "chat"
-MODERATOR_ROLE_NAME = "Moderator"
+GENERAL_CHANNEL_NAME = "│main-lounge"
+MODERATOR_ROLE_NAME = "Club Staff"
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -273,6 +273,11 @@ async def on_message(message):
 
             await log_action(message.guild, "🔓 Released", f"{user.mention}")
             await message.channel.send(f"{user.mention} released", delete_after=5)
+
+            try:
+                await message.delete()
+            except:
+                pass
         return
 
     if message.channel.name in JAIL_CHANNELS:
