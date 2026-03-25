@@ -162,22 +162,22 @@ async def jail_user(member, guild, reason):
     # existing log (UNCHANGED)
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
 
-    # ✅ NEW: find jail channel from config
+    # ✅ UPDATED: find jail channel (handles emoji names)
     jail_channel = None
-    for ch_name in JAIL_CHANNELS:
-        jail_channel = discord.utils.get(guild.text_channels, name=ch_name)
-        if jail_channel:
+    for ch in guild.text_channels:
+        if any(name in ch.name for name in JAIL_CHANNELS):
+            jail_channel = ch
             break
 
-    # ✅ UPDATED: send temp message (non-blocking)
+    # ✅ UPDATED: send temp message (non-blocking + debug)
     if jail_channel:
         try:
             await jail_channel.send(
                 f"🚨 {member.mention} was jailed\nReason: {reason}",
                 delete_after=60
             )
-        except:
-            pass
+        except Exception as e:
+            print("JAIL MESSAGE ERROR:", e)
 
 # ================= FACT LOOP =================
 async def send_hourly_fact():
