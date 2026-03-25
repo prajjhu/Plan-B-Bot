@@ -260,33 +260,35 @@ async def on_message(message):
         return
 
     # ===== AI CHAT =====
-    if content.startswith(PREFIX + "chat"):
+    # ===== AI CHAT =====
+if content.startswith(PREFIX + "chat"):
 
-        if message.channel.name != AI_CHANNEL_NAME:
-            await message.channel.send("Go to #ai-chat 🤖", delete_after=5)
-            return
-
-        role = discord.utils.get(message.guild.roles, name="AI Access")
-
-        if role not in message.author.roles:
-            await message.channel.send(
-                "you don’t have access to AI chat, dm @ap.snake 🔐",
-                delete_after=5
-            )
-            return
-
-        prompt = message.content[len(PREFIX + "chat"):].strip()
-
-        res = await client_ai.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role":"system","content":"Talk like a chill Gen Z human."},
-                {"role":"user","content":prompt}
-            ]
-        )
-
-        await message.channel.send(res.choices[0].message.content[:2000])
+    # ✅ FIX: handle emoji/prefix in channel name
+    if AI_CHANNEL_NAME not in message.channel.name:
+        await message.channel.send("Go to #ai-chat 🤖", delete_after=5)
         return
+
+    role = discord.utils.get(message.guild.roles, name="AI Access")
+
+    if role not in message.author.roles:
+        await message.channel.send(
+            "you don’t have access to AI chat, dm @ap.snake 🔐",
+            delete_after=5
+        )
+        return
+
+    prompt = message.content[len(PREFIX + "chat"):].strip()
+
+    res = await client_ai.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role":"system","content":"Talk like a chill Gen Z human."},
+            {"role":"user","content":prompt}
+        ]
+    )
+
+    await message.channel.send(res.choices[0].message.content[:2000])
+       return
 
     # ===== HARD FILTER =====
     if any(b in normalized for b in NORMALIZED_BANNED):
