@@ -260,7 +260,7 @@ async def on_message(message):
         return
 
     # ===== AI CHAT =====
-if content.startswith(PREFIX + "chat"):
+    if content.startswith(PREFIX + "chat"):
 
     # ✅ FIX: handle emoji/prefix in channel name
     if AI_CHANNEL_NAME not in message.channel.name:
