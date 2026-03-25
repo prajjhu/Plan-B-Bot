@@ -82,6 +82,43 @@ async def cleanup_spam(channel,user,ref,limit=30):
     except:
         pass
 
+async def cleanup_recent_spam(channel, user, limit=30):
+    recent = []
+    try:
+        async for msg in channel.history(limit=limit):
+            if msg.author == user:
+                recent.append(msg)
+    except:
+        return
+
+    recent.reverse()
+
+    spam_msgs = []
+    last_text = None
+    streak = 0
+
+    for msg in recent:
+        text = msg.content.strip().lower()
+
+        if not text:
+            continue
+
+        if last_text and is_similar(last_text, text):
+            streak += 1
+        else:
+            streak = 1
+
+        if streak >= 2:
+            spam_msgs.append(msg)
+
+        last_text = text
+
+    for msg in spam_msgs:
+        try:
+            await msg.delete()
+        except:
+            pass
+
 async def log_action(guild,title,desc):
     ch = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
     if ch:
@@ -103,6 +140,130 @@ async def notify_mods_jail(channel, guild, member, reason):
         )
     except Exception as e:
         print("MOD ALERT ERROR:", e)
+
+def find_channel_partial(guild, target):
+    target = target.lower().replace(" ", "").replace("│", "")
+    for ch in guild.text_channels:
+        name = ch.name.lower().replace(" ", "").replace("│", "")
+        if name == target or target in name:
+            return ch
+    return None
+
+async def post_setup_embeds(guild):
+    welcome_channel = find_channel_partial(guild, "welcome")
+    rules_channel = find_channel_partial(guild, "rules")
+    works_channel = find_channel_partial(guild, "how-plan-b-works")
+
+    welcome_embed = discord.Embed(
+        title="🌙 Welcome to Plan B",
+        description=(
+            "The backup spot that turned out better.\n\n"
+            "Plan B is where people land when the other server was too strict, too dead, or just not it. "
+            "This place is built for real conversations, late-night vibes, and people who want room to breathe without the server turning into chaos."
+        ),
+        color=discord.Color.from_rgb(135, 70, 190)
+    )
+    welcome_embed.add_field(
+        name="What this place is",
+        value=(
+            "A relaxed social server where you can talk freely, hang out properly, and actually enjoy the space. "
+            "Banter is fine, personality is fine, and people are allowed to sound human."
+        ),
+        inline=False
+    )
+    welcome_embed.add_field(
+        name="How moderation works",
+        value=(
+            "Moderation runs quietly in the background through AI-assisted checks. "
+            "It looks at context, repetition, escalation, and intent instead of panicking over every small message.\n\n"
+            "Admins and Club Staff still make the final call when something serious needs a human decision."
+        ),
+        inline=False
+    )
+    welcome_embed.add_field(
+        name="What to do first",
+        value=(
+            "• Read the rules\n"
+            "• Check how Plan B works\n"
+            "• Pick your roles and colours\n"
+            f"• Then head into {GENERAL_CHANNEL_NAME} and settle in"
+        ),
+        inline=False
+    )
+    welcome_embed.set_footer(text="Be yourself. Don’t ruin the room.")
+
+    rules_embed = discord.Embed(
+        title="📜 Plan B Rules",
+        description="Simple. Fair. Consistent.",
+        color=discord.Color.from_rgb(220, 80, 80)
+    )
+    rules_embed.add_field(
+        name="1) Respect people",
+        value="Disagree, joke, banter, argue — just do not turn it into targeted harassment or obsession.",
+        inline=False
+    )
+    rules_embed.add_field(
+        name="2) No hate or harmful intent",
+        value="Slurs, hate speech, serious threats, or genuinely harmful behavior cross the line fast.",
+        inline=False
+    )
+    rules_embed.add_field(
+        name="3) No spam or disruption",
+        value="Do not raid, flood, or repeatedly try to wreck the vibe for everyone else.",
+        inline=False
+    )
+    rules_embed.add_field(
+        name="4) No privacy violations",
+        value="No doxxing, leaking private information, stalking behavior, or putting another user at risk.",
+        inline=False
+    )
+    rules_embed.add_field(
+        name="5) Do not abuse leniency",
+        value="Just because the bot is calm does not mean you can keep pushing obvious bad behavior.",
+        inline=False
+    )
+    rules_embed.add_field(
+        name="6) Final calls",
+        value="AI handles most moderation flow, but admins and Club Staff decide serious edge cases and final outcomes.",
+        inline=False
+    )
+    rules_embed.set_footer(text="Talk freely. Act right when it matters.")
+
+    works_embed = discord.Embed(
+        title="🤖 How Plan B Works",
+        description=(
+            "Plan B uses AI-assisted moderation built to stay calm, understand context, and avoid overreacting."
+        ),
+        color=discord.Color.from_rgb(70, 170, 200)
+    )
+    works_embed.add_field(
+        name="What AI allows",
+        value="Casual swearing, friendly banter, normal disagreements, and people talking like actual humans.",
+        inline=False
+    )
+    works_embed.add_field(
+        name="What AI checks",
+        value="Repetition, escalation, targeted harassment, harmful intent, spam behavior, and severe filtered words.",
+        inline=False
+    )
+    works_embed.add_field(
+        name="How actions escalate",
+        value="Warning → escalation if it continues → jail if the user keeps pushing it or crosses the line badly enough.",
+        inline=False
+    )
+    works_embed.add_field(
+        name="Final decisions",
+        value="The bot handles most moderation automatically, but admins and Club Staff step in when a human call is needed.",
+        inline=False
+    )
+    works_embed.set_footer(text="AI watches the pattern. Humans decide the final call.")
+
+    if welcome_channel:
+        await welcome_channel.send(embed=welcome_embed)
+    if rules_channel:
+        await rules_channel.send(embed=rules_embed)
+    if works_channel:
+        await works_channel.send(embed=works_embed)
 
 # ================= FILTER =================
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
@@ -280,6 +441,17 @@ async def on_message(message):
                 pass
         return
 
+    # ===== SETUP =====
+    if content.startswith(PREFIX + "setup"):
+        if message.author.guild_permissions.administrator:
+            await post_setup_embeds(message.guild)
+            await message.channel.send("setup sent ✅", delete_after=5)
+            try:
+                await message.delete()
+            except:
+                pass
+        return
+
     if message.channel.name in JAIL_CHANNELS:
         return
 
@@ -327,8 +499,7 @@ async def on_message(message):
     user_message_times[uid] = [t for t in user_message_times[uid] if now - t < 3]
 
     if len(user_message_times[uid]) >= 7:
-        await message.author.timeout(datetime.timedelta(minutes=10))
-        await cleanup_spam(message.channel, message.author, content)
+        await cleanup_recent_spam(message.channel, message.author)
         await message.channel.send("bro relax 💀", delete_after=5)
         await jail_user(message.author, message.guild, "Raid spam", message.channel)
         return
@@ -400,7 +571,6 @@ async def on_message(message):
                     delete_after=5
                 )
             else:
-                await cleanup_spam(message.channel, message.author, content)
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Severe behavior", message.channel)
                 user_high_strikes[uid] = 0
@@ -417,7 +587,7 @@ async def on_message(message):
         user_repeat_count[uid] = 1
 
     if user_repeat_count[uid] >= 5:
-        await cleanup_spam(message.channel, message.author, content)
+        await cleanup_recent_spam(message.channel, message.author)
         await message.channel.send(bot_reply("jail"), delete_after=5)
         await jail_user(message.author, message.guild, "Spam", message.channel)
         return
