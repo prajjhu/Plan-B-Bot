@@ -14,6 +14,7 @@ JAIL_CHANNELS = ["jail-1", "jail-2"]
 AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "chat"
+MODERATOR_ROLE_NAME = "Moderators"
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -88,6 +89,24 @@ async def log_action(guild,title,desc):
         embed.timestamp = discord.utils.utcnow()
         await ch.send(embed=embed)
 
+async def notify_mods_jail(guild, member, reason):
+    role = discord.utils.get(guild.roles, name=MODERATOR_ROLE_NAME)
+    if not role:
+        return
+
+    ch = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
+    if not ch:
+        return
+
+    try:
+        await ch.send(
+            f"{role.mention} {member.mention} has been jailed, due to: {reason}",
+            allowed_mentions=discord.AllowedMentions(roles=True, users=True),
+            delete_after=10
+        )
+    except Exception as e:
+        print("MOD ALERT ERROR:", e)
+
 # ================= FILTER =================
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
@@ -161,6 +180,7 @@ async def jail_user(member, guild, reason):
 
     # existing log (UNCHANGED)
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
+    await notify_mods_jail(guild, member, reason)
 
     # ✅ UPDATED: find jail channel (handles emoji names)
     jail_channel = None
