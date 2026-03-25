@@ -158,7 +158,7 @@ async def post_setup_embeds(guild):
         title="🌙 Welcome to Plan B",
         description=(
             "The backup spot that turned out better.\n\n"
-            "Plan B is where people land when the other server was too strict, too dead, or just not it. "
+            "Plan B is your second spot always to hang around, chill with everyone, be unhinged in between,and talk freely. "
             "This place is built for real conversations, late-night vibes, and people who want room to breathe without the server turning into chaos."
         ),
         color=discord.Color.from_rgb(135, 70, 190)
@@ -253,7 +253,7 @@ async def post_setup_embeds(guild):
     )
     works_embed.add_field(
         name="Final decisions",
-        value="The bot handles most moderation automatically, but admins and Club Staff step in when a human call is needed.",
+        value="The bot handles most moderation automatically, but admins and Club Staff step in when a human call is needed for kick or ban.",
         inline=False
     )
     works_embed.set_footer(text="AI watches the pattern. Humans decide the final call.")
