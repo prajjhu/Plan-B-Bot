@@ -19,7 +19,7 @@ MODERATOR_ROLE_NAME = "Club Staff"
 SIMILARITY_THRESHOLD = 0.85
 
 # 🧠 REDUCED CONTEXT (LESS AGGRESSIVE)
-CONTEXT_LIMIT = 3
+CONTEXT_LIMIT = 1
 # ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -45,6 +45,8 @@ user_context = {}
 # ✅ NEW
 user_last_seen = {}
 recent_toxic_users = {}
+moderation_enabled = True
+standby_bot_messages = []
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -265,6 +267,54 @@ async def post_setup_embeds(guild):
     if works_channel:
         await works_channel.send(embed=works_embed)
 
+async def build_bouncer_context(channel, limit=8):
+    msgs = []
+    try:
+        async for msg in channel.history(limit=limit):
+            if msg.author.bot and msg.author != client.user:
+                continue
+            author = "Bouncer" if msg.author == client.user else msg.author.display_name
+            msgs.append(f"{author}: {msg.content}")
+    except:
+        return ""
+    msgs.reverse()
+    return "\n".join(msgs)
+
+async def bouncer_ai_reply(message):
+    try:
+        chat_context = await build_bouncer_context(message.channel)
+        res = await client_ai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {
+                    "role":"system",
+                    "content":(
+                        "You are Bouncer, the chill late-night club bouncer of a Discord server called Plan B. "
+                        "Moderation is currently paused, so you are only here to reply like a smart, socially aware human. "
+                        "Be concise, natural, witty when it fits, and reply based on the current chat context. "
+                        "Do not act like an assistant giving essays unless asked."
+                    )
+                },
+                {
+                    "role":"user",
+                    "content":f"Recent chat:\n{chat_context}\n\nReply to this message naturally:\n{message.author.display_name}: {message.content}"
+                }
+            ]
+        )
+        sent = await message.reply(res.choices[0].message.content[:2000], mention_author=False)
+        standby_bot_messages.append(sent)
+    except Exception as e:
+        print("BOUNCER REPLY ERROR:", e)
+
+async def clear_standby_messages():
+    global standby_bot_messages
+    for msg in standby_bot_messages:
+        try:
+            await msg.delete()
+        except:
+            pass
+    standby_bot_messages = []
+
 # ================= FILTER =================
 BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn","kanker"]
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
@@ -373,7 +423,9 @@ async def send_hourly_fact():
                         model="gpt-4.1-mini",
                         messages=[{"role":"system","content":"Give one short interesting fact."}]
                     )
-                    await channel.send(f"🧠 {res.choices[0].message.content.strip()}")
+                    sent = await channel.send(f"🧠 {res.choices[0].message.content.strip()}")
+                    if not moderation_enabled:
+                        standby_bot_messages.append(sent)
 
         except Exception as e:
             print("Fact error:", e)
@@ -389,18 +441,9 @@ async def on_ready():
 # ================= MAIN =================
 @client.event
 async def on_message(message):
+    global moderation_enabled
 
     if message.author == client.user:
-        return
-
-    if client.user in message.mentions:
-        await message.channel.send(random.choice([
-            "yeah i’m watching 👀",
-            "all systems running",
-            "i see everything",
-            "nothing escapes me",
-            "you good?"
-        ]), delete_after=5)
         return
 
     uid = str(message.author.id)
@@ -452,7 +495,48 @@ async def on_message(message):
                 pass
         return
 
+    # ===== STANDBY =====
+    if content.startswith(PREFIX + "standby"):
+        if message.author.guild_permissions.administrator:
+            moderation_enabled = False
+            await message.channel.send("moderation standby enabled 💤", delete_after=5)
+            try:
+                await message.delete()
+            except:
+                pass
+        return
+
+    # ===== RESUME =====
+    if content.startswith(PREFIX + "resume"):
+        if message.author.guild_permissions.administrator:
+            moderation_enabled = True
+            await clear_standby_messages()
+            await message.channel.send("moderation resumed ✅", delete_after=5)
+            try:
+                await message.delete()
+            except:
+                pass
+        return
+
     if message.channel.name in JAIL_CHANNELS:
+        return
+
+    if not moderation_enabled:
+        if "bouncer" in content:
+            await bouncer_ai_reply(message)
+            return
+
+        if client.user in message.mentions:
+            return
+
+    if moderation_enabled and client.user in message.mentions:
+        await message.channel.send(random.choice([
+            "yeah i’m watching 👀",
+            "all systems running",
+            "i see everything",
+            "nothing escapes me",
+            "you good?"
+        ]), delete_after=5)
         return
 
      # ===== AI CHAT =====
@@ -482,9 +566,13 @@ async def on_message(message):
             ]
         )
 
-        await message.channel.send(res.choices[0].message.content[:2000])
+        sent = await message.channel.send(res.choices[0].message.content[:2000])
+        if not moderation_enabled:
+            standby_bot_messages.append(sent)
         return
 
+    if not moderation_enabled:
+        return
 
     # ===== HARD FILTER =====
     if any(b in normalized for b in NORMALIZED_BANNED):
@@ -507,22 +595,25 @@ async def on_message(message):
     # ===== AI MOD =====
     if len(content) > 5:
 
-        use_context = any(w in content for w in TRIGGERS) or len(user_context[uid]) >= 2
+        use_context = any(w in content for w in TRIGGERS)
 
         result = await analyze(uid, message.content, use_context)
-
-        # ✅ MUTUAL DETECTION
         channel_id = str(message.channel.id)
-        recent_toxic_users.setdefault(channel_id, [])
-        recent_toxic_users[channel_id].append(uid)
-        if len(recent_toxic_users[channel_id]) > 6:
-            recent_toxic_users[channel_id].pop(0)
 
-        unique_users = set(recent_toxic_users[channel_id])
-        is_mutual = len(unique_users) >= 2
+        if result == "SAFE":
+            user_medium_strikes[uid] = max(0, user_medium_strikes.get(uid, 0) - 1)
+            user_high_strikes[uid] = max(0, user_high_strikes.get(uid, 0) - 1)
+            return
 
         # ===== MEDIUM =====
         if result == "MEDIUM":
+            recent_toxic_users.setdefault(channel_id, [])
+            recent_toxic_users[channel_id].append(uid)
+            if len(recent_toxic_users[channel_id]) > 6:
+                recent_toxic_users[channel_id].pop(0)
+
+            unique_users = set(recent_toxic_users[channel_id])
+            is_mutual = len(unique_users) >= 2
 
             if is_mutual:
                 await message.channel.send(
@@ -549,6 +640,13 @@ async def on_message(message):
 
         # ===== HIGH =====
         if result == "HIGH":
+            recent_toxic_users.setdefault(channel_id, [])
+            recent_toxic_users[channel_id].append(uid)
+            if len(recent_toxic_users[channel_id]) > 6:
+                recent_toxic_users[channel_id].pop(0)
+
+            unique_users = set(recent_toxic_users[channel_id])
+            is_mutual = len(unique_users) >= 2
 
             if is_mutual:
                 await message.channel.send(
