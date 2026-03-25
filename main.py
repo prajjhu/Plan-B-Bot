@@ -288,7 +288,7 @@ if content.startswith(PREFIX + "chat"):
     )
 
     await message.channel.send(res.choices[0].message.content[:2000])
-       return
+        return
 
     # ===== HARD FILTER =====
     if any(b in normalized for b in NORMALIZED_BANNED):
