@@ -4,7 +4,6 @@ import time
 import re
 import datetime
 import random
-import asyncio
 from difflib import SequenceMatcher
 from openai import AsyncOpenAI
 
@@ -142,130 +141,6 @@ async def notify_mods_jail(channel, guild, member, reason):
         )
     except Exception as e:
         print("MOD ALERT ERROR:", e)
-
-def find_channel_partial(guild, target):
-    target = target.lower().replace(" ", "").replace("│", "")
-    for ch in guild.text_channels:
-        name = ch.name.lower().replace(" ", "").replace("│", "")
-        if name == target or target in name:
-            return ch
-    return None
-
-async def post_setup_embeds(guild):
-    welcome_channel = find_channel_partial(guild, "welcome")
-    rules_channel = find_channel_partial(guild, "rules")
-    works_channel = find_channel_partial(guild, "how-plan-b-works")
-
-    welcome_embed = discord.Embed(
-        title="🌙 Welcome to Plan B",
-        description=(
-            "The backup spot that turned out better.\n\n"
-            "Plan B is your second spot always to hang around, chill with everyone, be unhinged in between,and talk freely. "
-            "This place is built for real conversations, late-night vibes, and people who want room to breathe without the server turning into chaos."
-        ),
-        color=discord.Color.from_rgb(135, 70, 190)
-    )
-    welcome_embed.add_field(
-        name="What this place is",
-        value=(
-            "A relaxed social server where you can talk freely, hang out properly, and actually enjoy the space. "
-            "Banter is fine, personality is fine, and people are allowed to sound human."
-        ),
-        inline=False
-    )
-    welcome_embed.add_field(
-        name="How moderation works",
-        value=(
-            "Moderation runs quietly in the background through AI-assisted checks. "
-            "It looks at context, repetition, escalation, and intent instead of panicking over every small message.\n\n"
-            "Admins and Club Staff still make the final call when something serious needs a human decision."
-        ),
-        inline=False
-    )
-    welcome_embed.add_field(
-        name="What to do first",
-        value=(
-            "• Read the rules\n"
-            "• Check how Plan B works\n"
-            "• Pick your roles and colours\n"
-            f"• Then head into {GENERAL_CHANNEL_NAME} and settle in"
-        ),
-        inline=False
-    )
-    welcome_embed.set_footer(text="Be yourself. Don’t ruin the room.")
-
-    rules_embed = discord.Embed(
-        title="📜 Plan B Rules",
-        description="Simple. Fair. Consistent.",
-        color=discord.Color.from_rgb(220, 80, 80)
-    )
-    rules_embed.add_field(
-        name="1) Respect people",
-        value="Disagree, joke, banter, argue — just do not turn it into targeted harassment or obsession.",
-        inline=False
-    )
-    rules_embed.add_field(
-        name="2) No hate or harmful intent",
-        value="Slurs, hate speech, serious threats, or genuinely harmful behavior cross the line fast.",
-        inline=False
-    )
-    rules_embed.add_field(
-        name="3) No spam or disruption",
-        value="Do not raid, flood, or repeatedly try to wreck the vibe for everyone else.",
-        inline=False
-    )
-    rules_embed.add_field(
-        name="4) No privacy violations",
-        value="No doxxing, leaking private information, stalking behavior, or putting another user at risk.",
-        inline=False
-    )
-    rules_embed.add_field(
-        name="5) Do not abuse leniency",
-        value="Just because the bot is calm does not mean you can keep pushing obvious bad behavior.",
-        inline=False
-    )
-    rules_embed.add_field(
-        name="6) Final calls",
-        value="AI handles most moderation flow, but admins and Club Staff decide serious edge cases and final outcomes.",
-        inline=False
-    )
-    rules_embed.set_footer(text="Talk freely. Act right when it matters.")
-
-    works_embed = discord.Embed(
-        title="🤖 How Plan B Works",
-        description=(
-            "Plan B uses AI-assisted moderation built to stay calm, understand context, and avoid overreacting."
-        ),
-        color=discord.Color.from_rgb(70, 170, 200)
-    )
-    works_embed.add_field(
-        name="What AI allows",
-        value="Casual swearing, friendly banter, normal disagreements, and people talking like actual humans.",
-        inline=False
-    )
-    works_embed.add_field(
-        name="What AI checks",
-        value="Repetition, escalation, targeted harassment, harmful intent, spam behavior, and severe filtered words.",
-        inline=False
-    )
-    works_embed.add_field(
-        name="How actions escalate",
-        value="Warning → escalation if it continues → jail if the user keeps pushing it or crosses the line badly enough.",
-        inline=False
-    )
-    works_embed.add_field(
-        name="Final decisions",
-        value="The bot handles most moderation automatically, but admins and Club Staff step in when a human call is needed for kick or ban.",
-        inline=False
-    )
-    works_embed.set_footer(text="AI watches the pattern. Humans decide the final call.")
-
-    if welcome_channel:
-        await welcome_channel.send(embed=welcome_embed)
-    if rules_channel:
-        await rules_channel.send(embed=rules_embed)
-    if works_channel:
-        await works_channel.send(embed=works_embed)
 
 async def build_bouncer_context(channel, limit=8):
     msgs = []
@@ -409,34 +284,10 @@ async def jail_user(member, guild, reason, source_channel=None):
         except Exception as e:
             print("JAIL MESSAGE ERROR:", e)
 
-# ================= FACT LOOP =================
-async def send_hourly_fact():
-    await client.wait_until_ready()
-
-    while not client.is_closed():
-        try:
-            for guild in client.guilds:
-                channel = discord.utils.get(guild.text_channels, name=GENERAL_CHANNEL_NAME)
-
-                if channel:
-                    res = await client_ai.chat.completions.create(
-                        model="gpt-4.1-mini",
-                        messages=[{"role":"system","content":"Give one short interesting fact."}]
-                    )
-                    sent = await channel.send(f"🧠 {res.choices[0].message.content.strip()}")
-                    if not moderation_enabled:
-                        standby_bot_messages.append(sent)
-
-        except Exception as e:
-            print("Fact error:", e)
-
-        await asyncio.sleep(3600)
-
 # ================= READY =================
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user}")
-    client.loop.create_task(send_hourly_fact())
 
 # ================= MAIN =================
 @client.event
@@ -478,17 +329,6 @@ async def on_message(message):
             await log_action(message.guild, "🔓 Released", f"{user.mention}")
             await message.channel.send(f"{user.mention} released", delete_after=5)
 
-            try:
-                await message.delete()
-            except:
-                pass
-        return
-
-    # ===== SETUP =====
-    if content.startswith(PREFIX + "setup"):
-        if message.author.guild_permissions.administrator:
-            await post_setup_embeds(message.guild)
-            await message.channel.send("setup sent ✅", delete_after=5)
             try:
                 await message.delete()
             except:
