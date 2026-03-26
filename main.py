@@ -48,6 +48,7 @@ recent_toxic_users = {}
 moderation_enabled = True
 standby_bot_messages = []
 invite_ad_warnings = []
+invite_ad_warning_times = {}
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -203,7 +204,7 @@ BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 # ✅ UPDATED
-TRIGGERS = ["kill","die","hate","stupid","kys","trash","worthless"]
+TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid","kys","trash","worthless"]
 
 # ================= AI =================
 async def analyze(uid, text, use_context=True):
@@ -231,14 +232,14 @@ Current message:
                         "You are a moderation AI for a chill social Discord server.\n\n"
 
                         "SAFE = casual language, jokes, slang, swearing\n"
-                        "MEDIUM = repeated or targeted insults which should be following a pattern\n"
+                        "MEDIUM = repeated or targeted insults\n"
                         "HIGH = clear threats, hate speech, or serious harassment\n\n"
 
                         "IMPORTANT RULES:\n"
                         "- Do NOT punish casual swearing\n"
                         "- Do NOT punish friendly banter\n"
                         "- Do NOT overreact to single messages\n"
-                        "- Only escalate if behavior is clearly repeated or harmful multiple times\n"
+                        "- Only escalate if behavior is clearly repeated or harmful\n"
                         "- Only return HIGH if it is serious and intentional\n\n"
 
                         "Return ONLY: SAFE, MEDIUM, HIGH"
@@ -367,12 +368,18 @@ async def on_message(message):
         return
 
     # ===== DISCORD INVITE FILTER =====
+    if uid in invite_ad_warning_times and now - invite_ad_warning_times[uid] > 10:
+        invite_ad_warning_times.pop(uid, None)
+        if uid in invite_ad_warnings:
+            invite_ad_warnings.remove(uid)
+
     if contains_discord_invite(message.content):
         if not message.author.guild_permissions.administrator and not is_invite_allowed_channel(message.channel):
             await message.delete()
 
             if uid not in invite_ad_warnings:
                 invite_ad_warnings.append(uid)
+                invite_ad_warning_times[uid] = now
                 await message.channel.send(
                     f"{message.author.mention}, Do not Advertise your server in these chat, Visit Partnerships, repeated offense will result in Jail-time",
                     delete_after=8
@@ -385,6 +392,7 @@ async def on_message(message):
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Discord invite advertising", message.channel)
                 invite_ad_warnings.remove(uid)
+                invite_ad_warning_times.pop(uid, None)
             return
 
     if message.channel.name in JAIL_CHANNELS:
