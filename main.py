@@ -15,6 +15,7 @@ LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "│main-lounge"
 MODERATOR_ROLE_NAME = "Club Staff"
 ALLOWED_INVITE_CHANNELS = ["│link", "│partner-p4p"]
+CONSOLE_CHANNEL_NAME = "bot-test-spams"
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -49,6 +50,8 @@ moderation_enabled = True
 standby_bot_messages = []
 invite_ad_warnings = []
 invite_ad_warning_times = {}
+recent_actions = []
+panel_registered = False
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -83,6 +86,102 @@ def contains_discord_invite(text):
 
 def is_invite_allowed_channel(channel):
     return channel.name in ALLOWED_INVITE_CHANNELS
+
+def is_console_channel(channel):
+    return channel.name == CONSOLE_CHANNEL_NAME
+
+def is_console_authorized(member):
+    if member.guild_permissions.administrator:
+        return True
+    role = discord.utils.get(member.guild.roles, name=MODERATOR_ROLE_NAME)
+    return role in member.roles if role else False
+
+def add_recent_action(text):
+    stamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+    recent_actions.append(f"[{stamp}] {text}")
+    if len(recent_actions) > 20:
+        recent_actions.pop(0)
+
+def build_status_embed(guild):
+    embed = discord.Embed(title="Bot Console Status", color=discord.Color.from_rgb(135, 70, 190))
+    embed.add_field(name="Moderation", value="Enabled ✅" if moderation_enabled else "Standby 💤", inline=True)
+    embed.add_field(name="Invite Filter", value="Enabled ✅", inline=True)
+    embed.add_field(name="Standby Replies", value=str(len(standby_bot_messages)), inline=True)
+    embed.add_field(name="Invite Warnings", value=str(len(invite_ad_warnings)), inline=True)
+    embed.add_field(name="Recent Actions", value=str(len(recent_actions)), inline=True)
+    embed.add_field(name="Console Channel", value=f"#{CONSOLE_CHANNEL_NAME}", inline=True)
+    embed.timestamp = discord.utils.utcnow()
+    return embed
+
+def build_recent_actions_embed():
+    embed = discord.Embed(title="Recent Bot Actions", color=discord.Color.blurple())
+    if recent_actions:
+        embed.description = "\n".join(recent_actions[-10:])
+    else:
+        embed.description = "No recent actions."
+    embed.timestamp = discord.utils.utcnow()
+    return embed
+
+def build_user_check_embed(member):
+    uid = str(member.id)
+    embed = discord.Embed(title=f"Check: {member.display_name}", color=discord.Color.orange())
+    embed.add_field(name="Medium Strikes", value=str(user_medium_strikes.get(uid, 0)), inline=True)
+    embed.add_field(name="High Strikes", value=str(user_high_strikes.get(uid, 0)), inline=True)
+    embed.add_field(name="Repeat Count", value=str(user_repeat_count.get(uid, 0)), inline=True)
+    embed.add_field(name="Invite Warning", value="Yes" if uid in invite_ad_warnings else "No", inline=True)
+    embed.add_field(name="Jail Lock", value="Yes" if uid in user_jail_lock else "No", inline=True)
+    embed.add_field(name="Recent Context", value=" | ".join(user_context.get(uid, [])[-1:]) or "None", inline=False)
+    embed.timestamp = discord.utils.utcnow()
+    return embed
+
+class ConsolePanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if not interaction.guild or not is_console_channel(interaction.channel) or not is_console_authorized(interaction.user):
+            await interaction.response.send_message(
+                f"This panel only works for staff/admins in #{CONSOLE_CHANNEL_NAME}.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Status", style=discord.ButtonStyle.secondary, custom_id="console_status")
+    async def status_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=build_status_embed(interaction.guild), ephemeral=True)
+
+    @discord.ui.button(label="Standby", style=discord.ButtonStyle.blurple, custom_id="console_standby")
+    async def standby_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global moderation_enabled
+        moderation_enabled = False
+        add_recent_action(f"{interaction.user.display_name} enabled standby")
+        await interaction.response.send_message("moderation standby enabled 💤", ephemeral=True)
+
+    @discord.ui.button(label="Resume", style=discord.ButtonStyle.green, custom_id="console_resume")
+    async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global moderation_enabled
+        moderation_enabled = True
+        await clear_standby_messages()
+        add_recent_action(f"{interaction.user.display_name} resumed moderation")
+        await interaction.response.send_message("moderation resumed ✅", ephemeral=True)
+
+    @discord.ui.button(label="Recent", style=discord.ButtonStyle.secondary, custom_id="console_recent")
+    async def recent_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=build_recent_actions_embed(), ephemeral=True)
+
+    @discord.ui.button(label="Clear Bot Msgs", style=discord.ButtonStyle.red, custom_id="console_clear")
+    async def clear_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        count = 0
+        async for msg in interaction.channel.history(limit=50):
+            if msg.author == client.user and msg.id != interaction.message.id:
+                try:
+                    await msg.delete()
+                    count += 1
+                except:
+                    pass
+        add_recent_action(f"{interaction.user.display_name} cleared {count} bot messages")
+        await interaction.response.send_message(f"cleared {count} bot messages", ephemeral=True)
 
 async def cleanup_spam(channel,user,ref,limit=30):
     def check(msg):
@@ -272,6 +371,7 @@ async def jail_user(member, guild, reason, source_channel=None):
 
     # existing log (UNCHANGED)
     await log_action(guild, "🚨 User Jailed", f"{member.mention}\n{reason}")
+    add_recent_action(f"{member.display_name} jailed - {reason}")
 
     if source_channel:
         await notify_mods_jail(source_channel, guild, member, reason)
@@ -296,6 +396,10 @@ async def jail_user(member, guild, reason, source_channel=None):
 # ================= READY =================
 @client.event
 async def on_ready():
+    global panel_registered
+    if not panel_registered:
+        client.add_view(ConsolePanel())
+        panel_registered = True
     print(f"Logged in as {client.user}")
 
 # ================= MAIN =================
@@ -336,6 +440,7 @@ async def on_message(message):
             user_high_strikes.pop(str(user.id), None)
 
             await log_action(message.guild, "🔓 Released", f"{user.mention}")
+            add_recent_action(f"{user.display_name} released")
             await message.channel.send(f"{user.mention} released", delete_after=5)
 
             try:
@@ -344,10 +449,57 @@ async def on_message(message):
                 pass
         return
 
+    # ===== CONSOLE =====
+    if is_console_channel(message.channel) and is_console_authorized(message.author):
+        if content.startswith(PREFIX + "status"):
+            await message.channel.send(embed=build_status_embed(message.guild), delete_after=20)
+            return
+
+        if content.startswith(PREFIX + "check") and message.mentions:
+            user = message.mentions[0]
+            await message.channel.send(embed=build_user_check_embed(user), delete_after=20)
+            return
+
+        if content.startswith(PREFIX + "recentactions"):
+            await message.channel.send(embed=build_recent_actions_embed(), delete_after=20)
+            return
+
+        if content.startswith(PREFIX + "clearbotmsgs"):
+            count = 0
+            async for msg in message.channel.history(limit=50):
+                if msg.author == client.user and msg.id != message.id:
+                    try:
+                        await msg.delete()
+                        count += 1
+                    except:
+                        pass
+            add_recent_action(f"{message.author.display_name} cleared {count} bot messages")
+            await message.channel.send(f"cleared {count} bot messages", delete_after=5)
+            return
+
+        if content.startswith(PREFIX + "panel"):
+            embed = discord.Embed(
+                title="Plan B Guardian Console",
+                description=(
+                    "Staff/Admin control panel for the bot.\n\n"
+                    "Buttons:\n"
+                    "• Status\n"
+                    "• Standby\n"
+                    "• Resume\n"
+                    "• Recent\n"
+                    "• Clear Bot Msgs"
+                ),
+                color=discord.Color.from_rgb(135, 70, 190)
+            )
+            embed.set_footer(text="Console works only in #bot-test-spams")
+            await message.channel.send(embed=embed, view=ConsolePanel())
+            return
+
     # ===== STANDBY =====
     if content.startswith(PREFIX + "standby"):
         if message.author.guild_permissions.administrator:
             moderation_enabled = False
+            add_recent_action(f"{message.author.display_name} enabled standby")
             await message.channel.send("moderation standby enabled 💤", delete_after=5)
             try:
                 await message.delete()
@@ -360,6 +512,7 @@ async def on_message(message):
         if message.author.guild_permissions.administrator:
             moderation_enabled = True
             await clear_standby_messages()
+            add_recent_action(f"{message.author.display_name} resumed moderation")
             await message.channel.send("moderation resumed ✅", delete_after=5)
             try:
                 await message.delete()
@@ -380,6 +533,7 @@ async def on_message(message):
             if uid not in invite_ad_warnings:
                 invite_ad_warnings.append(uid)
                 invite_ad_warning_times[uid] = now
+                add_recent_action(f"{message.author.display_name} warned for invite advertising")
                 await message.channel.send(
                     f"{message.author.mention}, Do not Advertise your server in these chat, Visit Partnerships, repeated offense will result in Jail-time",
                     delete_after=8
