@@ -14,6 +14,7 @@ AI_CHANNEL_NAME = "ai-chat"
 LOG_CHANNEL_NAME = "ai-logs"
 GENERAL_CHANNEL_NAME = "│main-lounge"
 MODERATOR_ROLE_NAME = "Club Staff"
+ALLOWED_INVITE_CHANNELS = ["│link", "│partner-p4p"]
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -46,6 +47,7 @@ user_last_seen = {}
 recent_toxic_users = {}
 moderation_enabled = True
 standby_bot_messages = []
+invite_ad_warnings = []
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -74,6 +76,12 @@ def normalize_text(text):
 
 def is_similar(a,b):
     return SequenceMatcher(None,a,b).ratio() >= SIMILARITY_THRESHOLD
+
+def contains_discord_invite(text):
+    return re.search(r'(?:https?://)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com/invite)/[A-Za-z0-9-]+', text, re.IGNORECASE) is not None
+
+def is_invite_allowed_channel(channel):
+    return channel.name in ALLOWED_INVITE_CHANNELS
 
 async def cleanup_spam(channel,user,ref,limit=30):
     def check(msg):
@@ -195,7 +203,7 @@ BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 # ✅ UPDATED
-TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid","kys","trash","worthless"]
+TRIGGERS = ["kill","die","hate","stupid","kys","trash","worthless"]
 
 # ================= AI =================
 async def analyze(uid, text, use_context=True):
@@ -223,14 +231,14 @@ Current message:
                         "You are a moderation AI for a chill social Discord server.\n\n"
 
                         "SAFE = casual language, jokes, slang, swearing\n"
-                        "MEDIUM = repeated or targeted insults\n"
+                        "MEDIUM = repeated or targeted insults which should be following a pattern\n"
                         "HIGH = clear threats, hate speech, or serious harassment\n\n"
 
                         "IMPORTANT RULES:\n"
                         "- Do NOT punish casual swearing\n"
                         "- Do NOT punish friendly banter\n"
                         "- Do NOT overreact to single messages\n"
-                        "- Only escalate if behavior is clearly repeated or harmful\n"
+                        "- Only escalate if behavior is clearly repeated or harmful multiple times\n"
                         "- Only return HIGH if it is serious and intentional\n\n"
 
                         "Return ONLY: SAFE, MEDIUM, HIGH"
@@ -357,6 +365,27 @@ async def on_message(message):
             except:
                 pass
         return
+
+    # ===== DISCORD INVITE FILTER =====
+    if contains_discord_invite(message.content):
+        if not message.author.guild_permissions.administrator and not is_invite_allowed_channel(message.channel):
+            await message.delete()
+
+            if uid not in invite_ad_warnings:
+                invite_ad_warnings.append(uid)
+                await message.channel.send(
+                    f"{message.author.mention}, Do not Advertise your server in these chat, Visit Partnerships, repeated offense will result in Jail-time",
+                    delete_after=8
+                )
+            else:
+                await message.channel.send(
+                    f"{message.author.mention} warned already.",
+                    delete_after=5
+                )
+                await message.channel.send(bot_reply("jail"), delete_after=5)
+                await jail_user(message.author, message.guild, "Discord invite advertising", message.channel)
+                invite_ad_warnings.remove(uid)
+            return
 
     if message.channel.name in JAIL_CHANNELS:
         return
