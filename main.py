@@ -18,9 +18,12 @@ ALLOWED_INVITE_CHANNELS = ["│link", "│partner-p4p"]
 CONSOLE_CHANNEL_NAME = "bot-test-spams"
 
 SIMILARITY_THRESHOLD = 0.85
+AI_STRIKE_DECAY = 12
+TARGET_WINDOW = 20
+WARNING_DECAY = 35
 
 # 🧠 REDUCED CONTEXT (LESS AGGRESSIVE)
-CONTEXT_LIMIT = 1
+CONTEXT_LIMIT = 3
 # ==========================================
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -52,6 +55,9 @@ invite_ad_warnings = []
 invite_ad_warning_times = {}
 recent_actions = []
 panel_registered = False
+pair_hostility = {}
+pair_last_time = {}
+pair_warned = {}
 
 # ================= PERSONALITY =================
 def bot_reply(level):
@@ -133,6 +139,140 @@ def build_user_check_embed(member):
     embed.add_field(name="Recent Context", value=" | ".join(user_context.get(uid, [])[-1:]) or "None", inline=False)
     embed.timestamp = discord.utils.utcnow()
     return embed
+
+DIRECT_TARGET_PHRASES = [
+    "fuck you", "you are", "you're", "ur ", "u are", "shut up", "stfu",
+    "nobody likes you", "worthless", "go cry", "cry more"
+]
+LIGHT_HOSTILITY_WORDS = ["idiot", "stupid", "trash", "bitch", "loser", "dumb", "retard"]
+SEVERE_TARGET_PHRASES = [
+    "kill yourself", "kys", "go die", "i will kill you", "i'll kill you",
+    "rape you", "pedophile", "nigger", "faggot"
+]
+EXIT_PHRASES = [
+    "i'm done", "im done", "done with this", "ain't talking to you again",
+    "not talking to you again", "leave me alone", "goodbye", "bye", "end of convo"
+]
+
+def get_target_id(message):
+    for user in message.mentions:
+        if not user.bot:
+            return str(user.id)
+
+    if message.reference and getattr(message.reference, "resolved", None):
+        ref = message.reference.resolved
+        if getattr(ref, "author", None) and not ref.author.bot:
+            return str(ref.author.id)
+
+    return None
+
+def is_exit_line(text):
+    t = text.lower()
+    return any(p in t for p in EXIT_PHRASES)
+
+def has_light_hostility(text):
+    t = text.lower()
+    return any(w in t for w in LIGHT_HOSTILITY_WORDS)
+
+def has_direct_target_phrase(text):
+    t = text.lower()
+    return any(p in t for p in DIRECT_TARGET_PHRASES)
+
+def has_severe_target_phrase(text):
+    t = normalize_text(text)
+    severe_normalized = [normalize_text(x) for x in SEVERE_TARGET_PHRASES]
+    return any(p in t for p in severe_normalized)
+
+def decay_pair_state(now):
+    expired_pairs = []
+    for pair, last_time in pair_last_time.items():
+        if now - last_time > TARGET_WINDOW:
+            expired_pairs.append(pair)
+
+    for pair in expired_pairs:
+        pair_hostility.pop(pair, None)
+        pair_last_time.pop(pair, None)
+
+    expired_warns = []
+    for pair, warned_at in pair_warned.items():
+        if now - warned_at > WARNING_DECAY:
+            expired_warns.append(pair)
+
+    for pair in expired_warns:
+        pair_warned.pop(pair, None)
+
+async def handle_targeted_harassment(message, now):
+    uid = str(message.author.id)
+    target_id = get_target_id(message)
+
+    if not target_id or target_id == uid:
+        return False
+
+    content = message.content.lower()
+    pair = (uid, target_id)
+    reverse_pair = (target_id, uid)
+
+    if has_severe_target_phrase(message.content):
+        await message.channel.send(bot_reply("jail"), delete_after=5)
+        await jail_user(message.author, message.guild, "Severe targeted harassment", message.channel)
+        pair_hostility.pop(pair, None)
+        pair_last_time.pop(pair, None)
+        pair_warned.pop(pair, None)
+        return True
+
+    direct = has_direct_target_phrase(content) or bool(message.mentions) or bool(message.reference)
+    light = has_light_hostility(content)
+    exit_line = is_exit_line(content)
+
+    if not direct and not light:
+        return False
+
+    last_time = pair_last_time.get(pair, 0)
+    if now - last_time > TARGET_WINDOW:
+        pair_hostility[pair] = 0
+
+    score = pair_hostility.get(pair, 0)
+
+    if exit_line:
+        score = max(0, score - 1)
+    elif direct and light:
+        score += 1.25
+    elif direct:
+        score += 0.75
+    elif light:
+        score += 0.5
+
+    pair_hostility[pair] = min(score, 6)
+    pair_last_time[pair] = now
+
+    reverse_active = reverse_pair in pair_last_time and now - pair_last_time.get(reverse_pair, 0) <= TARGET_WINDOW
+    reverse_score = pair_hostility.get(reverse_pair, 0)
+    is_mutual = reverse_active and reverse_score >= 1.5
+
+    if exit_line:
+        return False
+
+    if is_mutual and score < 5:
+        return False
+
+    warned_at = pair_warned.get(pair)
+
+    if score >= 3 and warned_at is None:
+        pair_warned[pair] = now
+        add_recent_action(f"{message.author.display_name} soft-warned for repeated targeting")
+        await message.channel.send("keep it chill", delete_after=4)
+        return True
+
+    if score >= 5 and warned_at and now - warned_at <= WARNING_DECAY:
+        add_recent_action(f"{message.author.display_name} jailed for repeated targeted harassment")
+        await message.channel.send(bot_reply("jail"), delete_after=5)
+        await jail_user(message.author, message.guild, "Repeated targeted harassment", message.channel)
+        pair_hostility.pop(pair, None)
+        pair_last_time.pop(pair, None)
+        pair_warned.pop(pair, None)
+        return True
+
+    return False
 
 class ConsolePanel(discord.ui.View):
     def __init__(self):
@@ -303,7 +443,7 @@ BANNED = ["nigger","faggot","rape","pedophile","nazi","hitler","heil","childporn
 NORMALIZED_BANNED = [normalize_text(w) for w in BANNED]
 
 # ✅ UPDATED
-TRIGGERS = ["idiot","retard","fuck you","bitch","kill","die","hate","stupid","kys","trash","worthless"]
+TRIGGERS = ["fuck you", "kys", "kill yourself", "worthless", "nobody likes you", "shut up", "stfu", "retard"]
 
 # ================= AI =================
 async def analyze(uid, text, use_context=True):
@@ -417,10 +557,11 @@ async def on_message(message):
 
     # ✅ DECAY SYSTEM
     last = user_last_seen.get(uid, now)
-    if now - last > 10:
+    if now - last > AI_STRIKE_DECAY:
         user_medium_strikes[uid] = max(0, user_medium_strikes.get(uid, 0) - 1)
         user_high_strikes[uid] = max(0, user_high_strikes.get(uid, 0) - 1)
     user_last_seen[uid] = now
+    decay_pair_state(now)
 
     # 🧠 STORE CONTEXT
     user_context.setdefault(uid, []).append(message.content)
@@ -613,6 +754,11 @@ async def on_message(message):
         await jail_user(message.author, message.guild, "Banned word", message.channel)
         return
 
+    # ===== TARGETED HARASSMENT =====
+    handled = await handle_targeted_harassment(message, now)
+    if handled:
+        return
+
     # ===== BURST SPAM =====
     user_message_times.setdefault(uid, []).append(now)
     user_message_times[uid] = [t for t in user_message_times[uid] if now - t < 3]
@@ -638,73 +784,31 @@ async def on_message(message):
 
         # ===== MEDIUM =====
         if result == "MEDIUM":
-            recent_toxic_users.setdefault(channel_id, [])
-            recent_toxic_users[channel_id].append(uid)
-            if len(recent_toxic_users[channel_id]) > 6:
-                recent_toxic_users[channel_id].pop(0)
-
-            unique_users = set(recent_toxic_users[channel_id])
-            is_mutual = len(unique_users) >= 2
-
-            if is_mutual:
-                await message.channel.send(
-                    f"⚠️ {message.author.mention} keep it chill (mutual)",
-                    delete_after=5
-                )
-                return
-
             s = user_medium_strikes.get(uid, 0) + 1
-            user_medium_strikes[uid] = s
-
-            if s <= 2:
-                await message.channel.send(
-                    warn_user(message.author, "medium"),
-                    delete_after=5
-                )
-            else:
-                await message.channel.send(bot_reply("jail"), delete_after=5)
-                await jail_user(message.author, message.guild, "Harassment", message.channel)
-                user_medium_strikes[uid] = 0
-
+            user_medium_strikes[uid] = min(s, 3)
             return
-
 
         # ===== HIGH =====
         if result == "HIGH":
-            recent_toxic_users.setdefault(channel_id, [])
-            recent_toxic_users[channel_id].append(uid)
-            if len(recent_toxic_users[channel_id]) > 6:
-                recent_toxic_users[channel_id].pop(0)
-
-            unique_users = set(recent_toxic_users[channel_id])
-            is_mutual = len(unique_users) >= 2
-
-            if is_mutual:
-                await message.channel.send(
-                    f"🚨 {message.author.mention} chill, don’t escalate",
-                    delete_after=5
-                )
-
-                s = user_high_strikes.get(uid, 0) + 1
-                user_high_strikes[uid] = s
-
-                if s < 3:
-                    return
+            if has_severe_target_phrase(message.content):
+                await message.channel.send(bot_reply("jail"), delete_after=5)
+                await jail_user(message.author, message.guild, "Severe behavior", message.channel)
+                user_high_strikes[uid] = 0
+                return
 
             s = user_high_strikes.get(uid, 0) + 1
             user_high_strikes[uid] = s
 
-            if s == 1:
-                await message.channel.send(
-                    warn_user(message.author, "high"),
-                    delete_after=5
-                )
-            else:
+            if s == 2:
+                add_recent_action(f"{message.author.display_name} warned for high-risk behavior")
+                await message.channel.send("enough", delete_after=4)
+                return
+
+            if s >= 3:
                 await message.channel.send(bot_reply("jail"), delete_after=5)
                 await jail_user(message.author, message.guild, "Severe behavior", message.channel)
                 user_high_strikes[uid] = 0
-
-            return
+                return
     
     # ===== SIMILAR SPAM =====
     last = user_last_content.get(uid)
